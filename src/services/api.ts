@@ -118,11 +118,24 @@ export async function addStudentApi(payload: AddStudentPayload): Promise<{ succe
       },
       body: JSON.stringify({
         action: 'addStudent',
+        // Vietnamese key aliases matching Google Sheets / Code.gs
+        HoTen: payload.fullName,
+        hoTen: payload.fullName,
+        Lop: payload.className,
+        lop: payload.className,
+        TenPhuHuynh: payload.parentName,
+        tenPhuHuynh: payload.parentName,
+        SoDienThoai: payload.phone,
+        soDienThoai: payload.phone,
+        MaHocSinh: newStudent.id,
+
+        // English camelCase key aliases
         fullName: payload.fullName,
         className: payload.className,
         parentName: payload.parentName,
         phone: payload.phone,
-        id: newStudent.id
+        id: newStudent.id,
+        ID: newStudent.id,
       }),
     });
 
@@ -174,8 +187,17 @@ export async function saveAttendanceApi(payload: SaveAttendancePayload): Promise
       body: JSON.stringify({
         action: 'saveAttendance',
         class: payload.class,
+        className: payload.class,
+        Lop: payload.class,
+        lop: payload.class,
+
         date: payload.date,
+        Ngay: payload.date,
+        ngay: payload.date,
+
         absentIds: payload.absentIds,
+        DanhSachVang: payload.absentIds,
+        danhSachVang: payload.absentIds,
       }),
     });
 
@@ -193,6 +215,62 @@ export async function saveAttendanceApi(payload: SaveAttendancePayload): Promise
   return {
     success: true,
     message: `Đã lưu điểm danh lớp ${payload.class} ngày ${payload.date} thành công!`
+  };
+}
+
+/**
+ * Cập nhật thông tin học sinh
+ */
+export async function updateStudentApi(updatedStudent: Student): Promise<{ success: boolean; message: string }> {
+  // Update local storage
+  const currentStudents = getLocalStudents();
+  const index = currentStudents.findIndex(s => s.id === updatedStudent.id);
+  if (index !== -1) {
+    currentStudents[index] = updatedStudent;
+    saveLocalStudents(currentStudents);
+  } else {
+    currentStudents.push(updatedStudent);
+    saveLocalStudents(currentStudents);
+  }
+
+  try {
+    // Attempt remote update POST request if API_URL is configured
+    await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8',
+      },
+      body: JSON.stringify({
+        action: 'updateStudent',
+        student: updatedStudent,
+        id: updatedStudent.id,
+        ID: updatedStudent.id,
+        MaHocSinh: updatedStudent.id,
+
+        HoTen: updatedStudent.fullName,
+        hoTen: updatedStudent.fullName,
+        fullName: updatedStudent.fullName,
+
+        Lop: updatedStudent.className,
+        lop: updatedStudent.className,
+        className: updatedStudent.className,
+
+        TenPhuHuynh: updatedStudent.parentName,
+        tenPhuHuynh: updatedStudent.parentName,
+        parentName: updatedStudent.parentName,
+
+        SoDienThoai: updatedStudent.phone,
+        soDienThoai: updatedStudent.phone,
+        phone: updatedStudent.phone,
+      }),
+    });
+  } catch (err) {
+    console.warn('Không thể gửi yêu cầu cập nhật tới API, đã lưu cục bộ:', err);
+  }
+
+  return {
+    success: true,
+    message: 'Cập nhật thông tin học sinh thành công!'
   };
 }
 
@@ -215,6 +293,8 @@ export async function deleteStudentApi(studentId: string): Promise<{ success: bo
       body: JSON.stringify({
         action: 'deleteStudent',
         id: studentId,
+        ID: studentId,
+        MaHocSinh: studentId,
       }),
     });
   } catch (err) {

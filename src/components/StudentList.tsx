@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Student, ToastMessage } from '../types';
 import { CLASSES } from '../config';
-import { getLocalStudents, deleteStudentApi } from '../services/api';
-import { Search, Trash2, Users, Phone, User, AlertTriangle, X, GraduationCap, Plus, RefreshCw } from 'lucide-react';
+import { getLocalStudents, deleteStudentApi, updateStudentApi } from '../services/api';
+import { Search, Trash2, Users, Phone, User, AlertTriangle, X, GraduationCap, Plus, RefreshCw, Pencil, Check } from 'lucide-react';
 
 interface StudentListProps {
   studentsListSignal?: number;
@@ -23,6 +23,11 @@ export const StudentList: React.FC<StudentListProps> = ({
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
+  // Edit state
+  const [studentToEdit, setStudentToEdit] = useState<Student | null>(null);
+  const [editFormData, setEditFormData] = useState<Partial<Student>>({});
+  const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
+
   // Load students from storage
   const loadStudents = () => {
     const list = getLocalStudents();
@@ -32,6 +37,50 @@ export const StudentList: React.FC<StudentListProps> = ({
   useEffect(() => {
     loadStudents();
   }, [studentsListSignal]);
+
+  const handleOpenEdit = (student: Student) => {
+    setStudentToEdit(student);
+    setEditFormData({ ...student });
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!studentToEdit || !editFormData.fullName?.trim() || !editFormData.className) return;
+
+    setIsSavingEdit(true);
+    try {
+      const updated: Student = {
+        id: studentToEdit.id,
+        fullName: editFormData.fullName.trim(),
+        className: editFormData.className,
+        parentName: editFormData.parentName?.trim() || '',
+        phone: editFormData.phone?.trim() || '',
+        gender: editFormData.gender === 'girl' ? 'girl' : 'boy',
+      };
+
+      const res = await updateStudentApi(updated);
+      if (res.success) {
+        addToast({
+          type: 'success',
+          title: 'Cập nhật thành công',
+          message: `Đã cập nhật thông tin học sinh ${updated.fullName}.`,
+        });
+        loadStudents();
+        if (onStudentDeleted) {
+          onStudentDeleted();
+        }
+        setStudentToEdit(null);
+      }
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: 'Lỗi',
+        message: 'Không thể cập nhật thông tin. Vui lòng thử lại.',
+      });
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
 
   // Filter students by class and search query
   const filteredStudents = students.filter((student) => {
@@ -177,14 +226,23 @@ export const StudentList: React.FC<StudentListProps> = ({
                     </div>
                   </div>
 
-                  {/* Delete Button */}
-                  <button
-                    onClick={() => setStudentToDelete(student)}
-                    title="Xóa học sinh này"
-                    className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer shrink-0"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {/* Action Buttons */}
+                  <div className="flex items-center space-x-1 shrink-0">
+                    <button
+                      onClick={() => handleOpenEdit(student)}
+                      title="Chỉnh sửa thông tin học sinh"
+                      className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all cursor-pointer"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setStudentToDelete(student)}
+                      title="Xóa học sinh này"
+                      className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Parent & Contact Info */}
@@ -310,6 +368,165 @@ export const StudentList: React.FC<StudentListProps> = ({
                 )}
               </button>
             </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Edit Student Modal */}
+      {studentToEdit && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border-2 border-slate-100 space-y-5 animate-in fade-in zoom-in duration-200 my-8">
+            
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center font-black">
+                  <Pencil className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-800">
+                    Chỉnh sửa thông tin học sinh
+                  </h3>
+                  <p className="text-xs text-slate-400 font-bold">
+                    Mã học sinh: {studentToEdit.id}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setStudentToEdit(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-xl hover:bg-slate-100 cursor-pointer transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditSubmit} className="space-y-4">
+              
+              {/* Họ và tên bé */}
+              <div>
+                <label className="block text-xs font-black uppercase tracking-wider text-slate-700 mb-1.5">
+                  Họ và tên học sinh <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editFormData.fullName || ''}
+                  onChange={(e) => setEditFormData({ ...editFormData, fullName: e.target.value })}
+                  placeholder="Nhập họ và tên bé..."
+                  className="w-full px-4 py-2.5 text-xs font-bold bg-slate-50 border-2 border-slate-200 focus:border-blue-500 focus:bg-white rounded-2xl outline-none transition-all"
+                />
+              </div>
+
+              {/* Lớp học */}
+              <div>
+                <label className="block text-xs font-black uppercase tracking-wider text-slate-700 mb-1.5">
+                  Lớp học <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  required
+                  value={editFormData.className || CLASSES[0]}
+                  onChange={(e) => setEditFormData({ ...editFormData, className: e.target.value })}
+                  className="w-full px-4 py-2.5 text-xs font-bold bg-slate-50 border-2 border-slate-200 focus:border-blue-500 focus:bg-white rounded-2xl outline-none transition-all cursor-pointer"
+                >
+                  {CLASSES.map((cls) => (
+                    <option key={cls} value={cls}>
+                      {cls}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Phụ huynh */}
+              <div>
+                <label className="block text-xs font-black uppercase tracking-wider text-slate-700 mb-1.5">
+                  Tên Phụ huynh
+                </label>
+                <input
+                  type="text"
+                  value={editFormData.parentName || ''}
+                  onChange={(e) => setEditFormData({ ...editFormData, parentName: e.target.value })}
+                  placeholder="Nhập tên phụ huynh..."
+                  className="w-full px-4 py-2.5 text-xs font-bold bg-slate-50 border-2 border-slate-200 focus:border-blue-500 focus:bg-white rounded-2xl outline-none transition-all"
+                />
+              </div>
+
+              {/* SĐT */}
+              <div>
+                <label className="block text-xs font-black uppercase tracking-wider text-slate-700 mb-1.5">
+                  Số điện thoại liên hệ
+                </label>
+                <input
+                  type="tel"
+                  value={editFormData.phone || ''}
+                  onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+                  placeholder="Ví dụ: 0901234567"
+                  className="w-full px-4 py-2.5 text-xs font-bold bg-slate-50 border-2 border-slate-200 focus:border-blue-500 focus:bg-white rounded-2xl outline-none transition-all"
+                />
+              </div>
+
+              {/* Giới tính */}
+              <div>
+                <label className="block text-xs font-black uppercase tracking-wider text-slate-700 mb-1.5">
+                  Giới tính
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setEditFormData({ ...editFormData, gender: 'boy' })}
+                    className={`py-2.5 px-4 rounded-2xl font-black text-xs border-2 flex items-center justify-center space-x-2 transition-all cursor-pointer ${
+                      editFormData.gender !== 'girl'
+                        ? 'bg-blue-50 border-blue-400 text-blue-700'
+                        : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="text-base">👦</span>
+                    <span>Bé trai</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditFormData({ ...editFormData, gender: 'girl' })}
+                    className={`py-2.5 px-4 rounded-2xl font-black text-xs border-2 flex items-center justify-center space-x-2 transition-all cursor-pointer ${
+                      editFormData.gender === 'girl'
+                        ? 'bg-rose-50 border-rose-400 text-rose-700'
+                        : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="text-base">👧</span>
+                    <span>Bé gái</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={isSavingEdit}
+                  onClick={() => setStudentToEdit(null)}
+                  className="px-4 py-2.5 text-xs font-black text-slate-600 hover:bg-slate-100 rounded-2xl transition-all cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEdit}
+                  className="px-5 py-2.5 text-xs font-black bg-blue-600 hover:bg-blue-700 text-white rounded-2xl shadow-md shadow-blue-200 transition-all flex items-center space-x-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingEdit ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Đang lưu...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Lưu thay đổi</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+            </form>
 
           </div>
         </div>
