@@ -24,6 +24,7 @@ export interface SaveAttendancePayload {
   class: string;
   date: string;
   absentIds: string[];
+  absentNames?: string;
 }
 
 export interface AddStudentPayload {

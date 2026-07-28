@@ -53,25 +53,34 @@ export async function getStudentsByClass(className: string): Promise<{ success: 
 
     if (response.ok) {
       const json = await response.json();
-      if (Array.isArray(json) && json.length > 0) {
-        // Map backend response if needed
-        const fetchedStudents: Student[] = json.map((item: any, index: number) => ({
-          id: item.id || item.ID || `SHEET-${index + 1}`,
-          fullName: item.fullName || item.name || item['Họ và Tên'] || item['Họ và tên'] || 'Học sinh',
-          className: item.className || item.class || item['Lớp'] || className,
-          parentName: item.parentName || item['Tên Phụ Huynh'] || item['Phụ huynh'] || '',
-          phone: item.phone || item['Số Điện Thoại'] || item['SĐT'] || '',
-          gender: index % 2 === 0 ? 'boy' : 'girl'
+      
+      // Extract array from direct array response or wrapped response { data: [...] }
+      const rawList = Array.isArray(json) 
+        ? json 
+        : (Array.isArray(json?.data) ? json.data : (Array.isArray(json?.students) ? json.students : null));
+
+      if (rawList !== null) {
+        // Map backend response fields flexibly (English & Vietnamese key names)
+        const fetchedStudents: Student[] = rawList.map((item: any, index: number) => ({
+          id: String(item.id || item.ID || item.MaHocSinh || item.maHocSinh || item['Mã học sinh'] || `STU-${101 + index}`),
+          fullName: item.fullName || item.HoTen || item.hoTen || item.name || item['Họ và Tên'] || item['Họ và tên'] || item['Họ tên'] || 'Học sinh',
+          className: item.className || item.Lop || item.lop || item.class || item['Lớp'] || className || 'Mầm',
+          parentName: item.parentName || item.TenPhuHuynh || item.tenPhuHuynh || item['Tên Phụ Huynh'] || item['Phụ huynh'] || '',
+          phone: item.phone ? String(item.phone) : (item.SoDienThoai ? String(item.SoDienThoai) : (item.soDienThoai ? String(item.soDienThoai) : (item['Số Điện Thoại'] || item['SĐT'] || ''))),
+          gender: (item.gender === 'girl' || item.GioiTinh === 'girl' || item.gioiTinh === 'Nữ' || item.gioiTinh === 'gái') ? 'girl' : 'boy'
         }));
+
+        // Sync local storage with Google Sheets data if fetched items exist
+        if (fetchedStudents.length > 0) {
+          saveLocalStudents(fetchedStudents);
+        }
 
         // Filter for requested class
         const filtered = fetchedStudents.filter(s => 
           !className || className === 'Tất cả' || s.className.trim().toLowerCase() === className.trim().toLowerCase()
         );
 
-        if (filtered.length > 0) {
-          return { success: true, data: filtered };
-        }
+        return { success: true, data: filtered };
       }
     }
   } catch (err) {
@@ -179,6 +188,10 @@ export async function saveAttendanceApi(payload: SaveAttendancePayload): Promise
   let apiMsg = '';
 
   try {
+    const absentNamesVal = payload.absentNames !== undefined
+      ? payload.absentNames
+      : (Array.isArray(payload.absentIds) ? payload.absentIds.join(', ') : payload.absentIds);
+
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: {
@@ -196,8 +209,10 @@ export async function saveAttendanceApi(payload: SaveAttendancePayload): Promise
         ngay: payload.date,
 
         absentIds: payload.absentIds,
-        DanhSachVang: payload.absentIds,
-        danhSachVang: payload.absentIds,
+        absentNames: absentNamesVal,
+        danhsachvang: absentNamesVal,
+        danhSachVang: absentNamesVal,
+        DanhSachVang: absentNamesVal,
       }),
     });
 

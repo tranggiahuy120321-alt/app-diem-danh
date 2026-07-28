@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Student, ToastMessage } from '../types';
 import { CLASSES } from '../config';
-import { getLocalStudents, deleteStudentApi, updateStudentApi } from '../services/api';
+import { getLocalStudents, getStudentsByClass, deleteStudentApi, updateStudentApi } from '../services/api';
 import { Search, Trash2, Users, Phone, User, AlertTriangle, X, GraduationCap, Plus, RefreshCw, Pencil, Check } from 'lucide-react';
 
 interface StudentListProps {
@@ -28,10 +28,21 @@ export const StudentList: React.FC<StudentListProps> = ({
   const [editFormData, setEditFormData] = useState<Partial<Student>>({});
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
-  // Load students from storage
-  const loadStudents = () => {
-    const list = getLocalStudents();
-    setStudents(list);
+  // Load students from API and local storage
+  const loadStudents = async () => {
+    const localList = getLocalStudents();
+    if (localList.length > 0) {
+      setStudents(localList);
+    }
+
+    try {
+      const res = await getStudentsByClass('Tất cả');
+      if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+        setStudents(res.data);
+      }
+    } catch (err) {
+      console.warn('StudentList API fetch warning:', err);
+    }
   };
 
   useEffect(() => {
@@ -82,11 +93,18 @@ export const StudentList: React.FC<StudentListProps> = ({
     }
   };
 
+  // Class matching helper
+  const isClassMatch = (studentClass: string | undefined, targetClass: string) => {
+    if (targetClass === 'Tất cả') return true;
+    if (!studentClass) return false;
+    const sc = studentClass.trim().toLowerCase();
+    const tc = targetClass.trim().toLowerCase();
+    return sc === tc || sc.includes(tc) || tc.includes(sc);
+  };
+
   // Filter students by class and search query
   const filteredStudents = students.filter((student) => {
-    const matchesClass =
-      selectedClass === 'Tất cả' ||
-      student.className.trim().toLowerCase() === selectedClass.trim().toLowerCase();
+    const matchesClass = isClassMatch(student.className, selectedClass);
 
     const query = searchQuery.trim().toLowerCase();
     const matchesQuery =
@@ -98,6 +116,11 @@ export const StudentList: React.FC<StudentListProps> = ({
 
     return matchesClass && matchesQuery;
   });
+
+  // Dynamic list of unique classes
+  const availableClasses = Array.from(
+    new Set([...CLASSES, ...students.map((s) => s.className).filter(Boolean)])
+  );
 
   // Handle delete student
   const handleDeleteConfirm = async () => {
@@ -148,10 +171,8 @@ export const StudentList: React.FC<StudentListProps> = ({
             >
               Tất cả ({students.length})
             </button>
-            {CLASSES.map((cls) => {
-              const count = students.filter(
-                (s) => s.className.trim().toLowerCase() === cls.trim().toLowerCase()
-              ).length;
+            {availableClasses.map((cls) => {
+              const count = students.filter((s) => isClassMatch(s.className, cls)).length;
               return (
                 <button
                   key={cls}

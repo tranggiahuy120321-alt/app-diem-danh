@@ -144,10 +144,11 @@ export const DailyAttendance: React.FC<DailyAttendanceProps> = ({
 
     setIsSaving(true);
 
-    // Get array of absent student IDs
-    const absentIds = students
-      .filter((s) => absentMap[s.id] === true)
-      .map((s) => s.id);
+    // Filter absent students
+    const absentStudents = students.filter((s) => absentMap[s.id] === true);
+    const absentIds = absentStudents.map((s) => s.id);
+    // Map absent students' full names (fullName / HoTen) joined by ", "
+    const absentNames = absentStudents.map((s) => s.fullName).join(', ');
 
     try {
       const res = await saveAttendanceApi({
@@ -155,6 +156,7 @@ export const DailyAttendance: React.FC<DailyAttendanceProps> = ({
         class: selectedClass,
         date: attendanceDate,
         absentIds,
+        absentNames,
       });
 
       if (res.success) {
