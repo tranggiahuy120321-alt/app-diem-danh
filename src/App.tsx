@@ -1,23 +1,40 @@
 import React, { useState, useEffect } from 'react';
-import { Navbar } from './components/Navbar';
+import { Navbar, NavTab } from './components/Navbar';
 import { DailyAttendance } from './components/DailyAttendance';
 import { AddStudent } from './components/AddStudent';
+import { StudentList } from './components/StudentList';
 import { Reports } from './components/Reports';
 import { ToastContainer } from './components/ToastContainer';
 import { Logo } from './components/Logo';
 import { ToastMessage, Student } from './types';
-import { getLocalStudents } from './services/api';
+import { getLocalStudents, getStudentsByClass } from './services/api';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'attendance' | 'addStudent' | 'reports'>('attendance');
+  const [activeTab, setActiveTab] = useState<NavTab>('attendance');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [studentSignal, setStudentSignal] = useState<number>(0);
   const [totalStudentsCount, setTotalStudentsCount] = useState<number>(0);
 
-  // Load initial total student count
+  // Load total student count
   useEffect(() => {
-    const list = getLocalStudents();
-    setTotalStudentsCount(list.length);
+    let isMounted = true;
+    const fetchTotal = async () => {
+      try {
+        const res = await getStudentsByClass('Tất cả');
+        if (isMounted && res.success && Array.isArray(res.data)) {
+          setTotalStudentsCount(res.data.length);
+          return;
+        }
+      } catch (e) {
+        // Fallback to local storage count
+      }
+      if (isMounted) {
+        const list = getLocalStudents();
+        setTotalStudentsCount(list.length);
+      }
+    };
+    fetchTotal();
+    return () => { isMounted = false; };
   }, [studentSignal]);
 
   // Toast Helper
@@ -40,6 +57,10 @@ export default function App() {
     setStudentSignal((prev) => prev + 1);
   };
 
+  const handleStudentDeleted = () => {
+    setStudentSignal((prev) => prev + 1);
+  };
+
   return (
     <div className="min-h-screen bg-sky-50 text-slate-800 flex flex-col font-sans antialiased">
       
@@ -55,6 +76,13 @@ export default function App() {
         {activeTab === 'attendance' ? (
           <DailyAttendance
             studentsListSignal={studentSignal}
+            addToast={addToast}
+          />
+        ) : activeTab === 'students' ? (
+          <StudentList
+            studentsListSignal={studentSignal}
+            onStudentDeleted={handleStudentDeleted}
+            onNavigateToAddStudent={() => setActiveTab('addStudent')}
             addToast={addToast}
           />
         ) : activeTab === 'addStudent' ? (

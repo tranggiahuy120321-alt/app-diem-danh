@@ -10,14 +10,23 @@ export const getLocalStudents = (): Student[] => {
   try {
     const data = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (data) {
-      return JSON.parse(data);
+      const parsed: Student[] = JSON.parse(data);
+      const mockIds = new Set([
+        'STU-101', 'STU-102', 'STU-103', 'STU-104', 'STU-105', 'STU-106', 'STU-107',
+        'STU-201', 'STU-202', 'STU-203', 'STU-204', 'STU-205', 'STU-206'
+      ]);
+      const filtered = parsed.filter(s => !mockIds.has(s.id));
+      if (filtered.length !== parsed.length) {
+        saveLocalStudents(filtered);
+      }
+      return filtered;
     }
   } catch (e) {
     console.error('Lỗi đọc dữ liệu từ localStorage', e);
   }
-  // Initialize with initial students
-  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(INITIAL_STUDENTS));
-  return INITIAL_STUDENTS;
+  // Initialize with initial students (empty array)
+  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify([]));
+  return [];
 };
 
 // Internal helper to save local students
@@ -188,6 +197,37 @@ export async function saveAttendanceApi(payload: SaveAttendancePayload): Promise
 }
 
 /**
+ * Xóa học sinh khỏi danh sách
+ */
+export async function deleteStudentApi(studentId: string): Promise<{ success: boolean; message: string }> {
+  // Update local storage
+  const currentStudents = getLocalStudents();
+  const updatedStudents = currentStudents.filter(s => s.id !== studentId);
+  saveLocalStudents(updatedStudents);
+
+  try {
+    // Attempt remote deletion POST request if API_URL is configured
+    await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8',
+      },
+      body: JSON.stringify({
+        action: 'deleteStudent',
+        id: studentId,
+      }),
+    });
+  } catch (err) {
+    console.warn('Không thể gửi Yêu cầu xóa tới API, đã xóa cục bộ:', err);
+  }
+
+  return {
+    success: true,
+    message: 'Đã xóa học sinh thành công!'
+  };
+}
+
+/**
  * Lấy danh sách lịch sử điểm danh đã lưu
  */
 export function getAttendanceHistory(): any[] {
@@ -195,7 +235,7 @@ export function getAttendanceHistory(): any[] {
     const raw = localStorage.getItem(ATTENDANCE_HISTORY_KEY);
     if (raw) {
       const list = JSON.parse(raw);
-      if (Array.isArray(list) && list.length > 0) {
+      if (Array.isArray(list)) {
         return list;
       }
     }
@@ -203,50 +243,7 @@ export function getAttendanceHistory(): any[] {
     console.error('Lỗi đọc lịch sử điểm danh:', e);
   }
 
-  // Populate sample attendance history if empty
-  const todayStr = new Date().toISOString().split('T')[0];
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = yesterday.toISOString().split('T')[0];
-
-  const sampleHistory = [
-    {
-      id: 'REC-001',
-      date: todayStr,
-      className: 'Lớp dưới',
-      absentIds: ['STU-102'],
-      timestamp: new Date().toISOString()
-    },
-    {
-      id: 'REC-002',
-      date: todayStr,
-      className: 'Lớp trên lầu',
-      absentIds: [],
-      timestamp: new Date().toISOString()
-    },
-    {
-      id: 'REC-003',
-      date: yesterdayStr,
-      className: 'Lớp dưới',
-      absentIds: ['STU-104', 'STU-107'],
-      timestamp: yesterday.toISOString()
-    },
-    {
-      id: 'REC-004',
-      date: yesterdayStr,
-      className: 'Lớp trên lầu',
-      absentIds: ['STU-203'],
-      timestamp: yesterday.toISOString()
-    }
-  ];
-
-  try {
-    localStorage.setItem(ATTENDANCE_HISTORY_KEY, JSON.stringify(sampleHistory));
-  } catch (e) {
-    console.error('Lỗi khởi tạo mẫu lịch sử:', e);
-  }
-
-  return sampleHistory;
+  return [];
 }
 
 /**

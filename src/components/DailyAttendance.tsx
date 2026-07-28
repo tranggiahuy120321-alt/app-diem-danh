@@ -198,14 +198,14 @@ export const DailyAttendance: React.FC<DailyAttendanceProps> = ({
               </label>
               {/* Class Selector Pills */}
               <div className="flex flex-wrap gap-2">
-                {CLASSES.map((cls) => {
+                {['Tất cả', ...CLASSES].map((cls) => {
                   const isSelected = selectedClass === cls;
                   return (
                     <button
                       key={cls}
                       type="button"
                       onClick={() => setSelectedClass(cls)}
-                      className={`px-5 py-2.5 rounded-2xl font-black text-sm transition-all cursor-pointer ${
+                      className={`px-4 py-2.5 rounded-2xl font-black text-xs sm:text-sm transition-all cursor-pointer ${
                         isSelected
                           ? 'bg-orange-50 border-2 border-orange-400 text-orange-700 shadow-sm'
                           : 'bg-white border-2 border-slate-100 text-slate-500 hover:border-slate-200'
