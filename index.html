@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mầm non Hướng Dương - Sổ Điểm Danh Điện Tử</title>
+    <script>
+      (function() {
+        try {
+          var fetchStorage = window.fetch;
+          Object.defineProperty(window, 'fetch', {
+            get: function() {
+              return fetchStorage;
+            },
+            set: function(val) {
+              fetchStorage = val;
+            },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {
+          console.warn('window.fetch setter patch:', e);
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
