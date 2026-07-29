@@ -10,11 +10,13 @@ import {
   Phone, 
   Filter, 
   RefreshCw, 
-  Loader2
+  Loader2,
+  Trash2,
+  X
 } from 'lucide-react';
 import { Student } from '../types';
 import { CLASSES } from '../config';
-import { getLocalStudents, getStudentsByClass, getAttendanceHistoryApi } from '../services/api';
+import { getLocalStudents, getStudentsByClass, getAttendanceHistoryApi, deleteAttendanceApi } from '../services/api';
 
 interface ReportsProps {
   addToast: (toast: { type: 'success' | 'error' | 'info'; title: string; message?: string }) => void;
@@ -55,6 +57,27 @@ export const formatTime = (dateString?: string): string => {
   return str;
 };
 
+/**
+ * Utility: Lấy thứ trong tuần dạng Tiếng Việt (Thứ Hai, Thứ Ba, ..., Chủ Nhật)
+ */
+export const getVietnameseDayOfWeek = (dateObj: Date): string => {
+  if (!dateObj || isNaN(dateObj.getTime())) return '';
+  const day = dateObj.getDay();
+  const days = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+  return days[day];
+};
+
+/**
+ * Utility: Format ngày dạng DD/MM/YYYY
+ */
+export const formatViDate = (d: Date): string => {
+  if (!d || isNaN(d.getTime())) return '';
+  const day = d.getDate().toString().padStart(2, '0');
+  const month = (d.getMonth() + 1).toString().padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
 const isClassMatch = (studentClass: string | undefined, targetClass: string) => {
   if (!targetClass || targetClass === 'Tất cả') return true;
   if (!studentClass) return false;
@@ -67,11 +90,40 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
   const [reportSubTab, setReportSubTab] = useState<'history' | 'students'>('history');
   const [selectedClass, setSelectedClass] = useState<string>('Tất cả');
   const [selectedDate, setSelectedDate] = useState<string>('');
-  const [timePeriod, setTimePeriod] = useState<'this_week' | '7_days' | 'this_month' | 'last_month' | '30_days' | 'all'>('this_month');
+  const [timePeriod, setTimePeriod] = useState<'this_week' | '7_days' | 'this_month' | 'last_month' | '30_days' | 'custom' | 'all'>('this_month');
+  const [customStartDate, setCustomStartDate] = useState<string>('');
+  const [customEndDate, setCustomEndDate] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [historyList, setHistoryList] = useState<any[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [deletingTimestamp, setDeletingTimestamp] = useState<string | null>(null);
+
+  // Handle delete attendance record
+  const handleDeleteRecord = async (rec: any) => {
+    const confirmDelete = window.confirm('Bạn có chắc chắn muốn xóa bản ghi này?');
+    if (!confirmDelete) return;
+
+    const targetTs = rec.timestamp || rec.date || '';
+    setDeletingTimestamp(targetTs);
+
+    try {
+      const result = await deleteAttendanceApi(targetTs);
+      alert(result.message || 'Đã gửi yêu cầu xóa.');
+      if (result.success) {
+        addToast({ type: 'success', title: 'Xóa thành công', message: result.message || 'Đã xóa bản ghi điểm danh.' });
+        await loadData();
+      } else {
+        addToast({ type: 'error', title: 'Xóa thất bại', message: result.message || 'Không thể xóa bản ghi điểm danh.' });
+      }
+    } catch (error: any) {
+      console.error('Lỗi khi xóa bản ghi:', error);
+      alert('Lỗi App: ' + (error?.message || error));
+      addToast({ type: 'error', title: 'Lỗi hệ thống', message: error?.message || 'Không thể kết nối đến Google Sheets.' });
+    } finally {
+      setDeletingTimestamp(null);
+    }
+  };
 
   // Load history from Google Sheets API & students list
   const loadData = async () => {
@@ -161,10 +213,24 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
       if (isNaN(recDate.getTime())) return true;
 
       if (timePeriod === 'this_week') {
-        const dayOfWeek = now.getDay();
-        const distanceToMon = (dayOfWeek + 6) % 7;
-        const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - distanceToMon, 0, 0, 0);
-        return recDate >= monday;
+        const curr = new Date();
+        const firstDayOfWeek = new Date(curr.setDate(curr.getDate() - curr.getDay() + (curr.getDay() === 0 ? -6 : 1)));
+        firstDayOfWeek.setHours(0, 0, 0, 0);
+        return recDate >= firstDayOfWeek;
+      }
+
+      if (timePeriod === 'custom') {
+        if (customStartDate) {
+          const startDate = new Date(customStartDate);
+          startDate.setHours(0, 0, 0, 0);
+          if (recDate < startDate) return false;
+        }
+        if (customEndDate) {
+          const endDate = new Date(customEndDate);
+          endDate.setHours(23, 59, 59, 999);
+          if (recDate > endDate) return false;
+        }
+        return true;
       }
 
       if (timePeriod === 'this_month') {
@@ -190,7 +256,7 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
 
       return true; // 'all'
     });
-  }, [historyList, timePeriod]);
+  }, [historyList, timePeriod, customStartDate, customEndDate]);
 
   // Student list mapping with attendance stats
   const studentStats = useMemo(() => {
@@ -229,25 +295,76 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
     });
   }, [students, filteredHistoryByTime, selectedClass, searchTerm]);
 
-  // Overall Statistics Metrics
-  const totalStudents = students.length;
-  const totalSessionsRecorded = historyList.length;
+  // Computed stats for the 3 top summary cards (Sĩ số, Đi học, Vắng mặt)
+  const currentOverviewData = useMemo(() => {
+    // 1. Total students in selected class (or whole school)
+    const classStudentsList = students.filter((s) => isClassMatch(s.className, selectedClass));
+    const targetTotalStudents = classStudentsList.length || (selectedClass === 'Tất cả' ? students.length : 0);
 
-  const overallPresenceRate = useMemo(() => {
-    if (historyList.length === 0 || students.length === 0) return 100;
-    let totalPresent = 0;
-    let totalPossible = 0;
+    // 2. Determine target records to calculate stats directly from filteredHistory
+    let recordsForOverview = filteredHistory;
+    let displayDateObj = new Date();
 
-    historyList.forEach((rec) => {
-      const classCount = students.filter((s) => isClassMatch(s.className, rec.className)).length || 10;
-      const absentCount = getAbsentNamesFromRecord(rec).length;
-      totalPresent += Math.max(0, classCount - absentCount);
-      totalPossible += classCount;
+    if (selectedDate) {
+      recordsForOverview = filteredHistory;
+      const parsed = new Date(selectedDate);
+      if (!isNaN(parsed.getTime())) {
+        displayDateObj = parsed;
+      }
+    } else if (filteredHistory.length > 0) {
+      // Pick records corresponding to the latest date in filteredHistory
+      const latestDateStr = filteredHistory[0].date;
+      if (latestDateStr) {
+        let parsed = new Date(latestDateStr);
+        if (isNaN(parsed.getTime())) {
+          const cleanStr = String(latestDateStr).trim();
+          const parts = cleanStr.split(/[-/]/);
+          if (parts.length === 3) {
+            if (parts[0].length === 4) {
+              parsed = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+            } else {
+              parsed = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+            }
+          }
+        }
+        if (!isNaN(parsed.getTime())) {
+          displayDateObj = parsed;
+        }
+        const latestFormatted = formatDate(latestDateStr);
+        recordsForOverview = filteredHistory.filter((h) => {
+          const itemFormatted = formatDate(h.date);
+          return itemFormatted === latestFormatted || h.date === latestDateStr;
+        });
+      }
+    }
+
+    // 3. Collect unique absent student names across recordsForOverview
+    const uniqueAbsentNames = new Set<string>();
+    recordsForOverview.forEach((rec) => {
+      const absents = getAbsentNamesFromRecord(rec);
+      absents.forEach((name) => {
+        if (name && name !== '-' && name.toLowerCase() !== 'không' && name.toLowerCase() !== 'không có') {
+          uniqueAbsentNames.add(name.toLowerCase().trim());
+        }
+      });
     });
 
-    if (totalPossible === 0) return 100;
-    return Math.round((totalPresent / totalPossible) * 100);
-  }, [historyList, students]);
+    const totalAbsent = uniqueAbsentNames.size;
+    const presentCount = Math.max(0, targetTotalStudents - totalAbsent);
+    const presenceRate = targetTotalStudents > 0 ? Math.round((presentCount / targetTotalStudents) * 100) : 100;
+
+    const dayOfWeekStr = getVietnameseDayOfWeek(displayDateObj);
+    const formattedDate = formatViDate(displayDateObj);
+
+    return {
+      total: targetTotalStudents,
+      present: presentCount,
+      absent: totalAbsent,
+      presenceRate: presenceRate,
+      dateLabel: selectedDate || filteredHistory.length > 0 ? `Ngày ${formattedDate} (${dayOfWeekStr})` : 'Tất cả lịch sử',
+      classLabel: selectedClass === 'Tất cả' ? 'Toàn trường' : selectedClass
+    };
+  }, [students, filteredHistory, selectedClass, selectedDate]);
 
   // CSV Export handler
   const handleExportCSV = () => {
@@ -283,80 +400,82 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
   };
 
   return (
-    <div className="max-w-5xl mx-auto py-2 space-y-6">
+    <div className="max-w-6xl mx-auto py-2 space-y-6">
 
-      {/* Summary Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <div className="bg-white p-4 rounded-3xl border-2 border-slate-100 shadow-xs flex items-center space-x-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 font-black flex items-center justify-center shrink-0 text-xl">
+      {/* 3 Summary Stat Cards matching screenshot */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5">
+        {/* Card 1: SĨ SỐ */}
+        <div className="bg-white p-5 rounded-3xl border-2 border-slate-100/90 shadow-xs flex items-center space-x-4">
+          <div className="w-14 h-14 rounded-2xl bg-sky-100 flex items-center justify-center shrink-0 text-3xl">
             👶
           </div>
           <div>
-            <p className="text-[11px] font-black text-slate-400 uppercase tracking-wider">Tổng Sĩ Số</p>
-            <p className="text-xl font-black text-slate-800">{totalStudents} <span className="text-xs text-slate-400">bé</span></p>
+            <p className="text-[12px] font-black text-slate-400 uppercase tracking-wider">SĨ SỐ</p>
+            <p className="text-2xl sm:text-3xl font-black text-slate-900 leading-none mt-1">
+              {currentOverviewData.total} <span className="text-sm font-bold text-slate-500 ml-0.5">bé</span>
+            </p>
+            <p className="text-xs font-black text-slate-500 mt-1">{currentOverviewData.classLabel}</p>
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-3xl border-2 border-slate-100 shadow-xs flex items-center space-x-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-blue-100 text-blue-700 font-black flex items-center justify-center shrink-0 text-xl">
-            📝
+        {/* Card 2: ĐI HỌC */}
+        <div className="bg-emerald-50/70 p-5 rounded-3xl border-2 border-emerald-300/80 shadow-xs flex items-center space-x-4">
+          <div className="w-14 h-14 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+            <CheckCircle2 className="w-8 h-8 text-white" />
           </div>
           <div>
-            <p className="text-[11px] font-black text-slate-400 uppercase tracking-wider">Số Lượt Điểm Danh</p>
-            <p className="text-xl font-black text-slate-800">{totalSessionsRecorded} <span className="text-xs text-slate-400">lần</span></p>
+            <p className="text-[12px] font-black text-emerald-800 uppercase tracking-wider">ĐI HỌC</p>
+            <p className="text-2xl sm:text-3xl font-black text-emerald-950 leading-none mt-1">
+              {currentOverviewData.present} <span className="text-sm font-bold text-emerald-800 ml-0.5">bé</span>
+            </p>
+            <p className="text-xs font-black text-emerald-700 mt-1">{currentOverviewData.presenceRate}% có mặt</p>
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-3xl border-2 border-slate-100 shadow-xs flex items-center space-x-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 font-black flex items-center justify-center shrink-0 text-xl">
-            🌟
+        {/* Card 3: VẮNG MẶT */}
+        <div className="bg-rose-50/70 p-5 rounded-3xl border-2 border-rose-200/80 shadow-xs flex items-center space-x-4">
+          <div className="w-14 h-14 rounded-2xl bg-red-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+            <XCircle className="w-8 h-8 text-white" />
           </div>
           <div>
-            <p className="text-[11px] font-black text-slate-400 uppercase tracking-wider">Tỷ Lệ Chuyên Cần</p>
-            <p className="text-xl font-black text-emerald-600">{overallPresenceRate}%</p>
-          </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-3xl border-2 border-slate-100 shadow-xs flex items-center space-x-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-pink-100 text-pink-700 font-black flex items-center justify-center shrink-0 text-xl">
-            🏫
-          </div>
-          <div>
-            <p className="text-[11px] font-black text-slate-400 uppercase tracking-wider">Số Lớp Học</p>
-            <p className="text-xl font-black text-slate-800">{CLASSES.length} <span className="text-xs text-slate-400">lớp</span></p>
+            <p className="text-[12px] font-black text-red-800 uppercase tracking-wider">VẮNG MẶT</p>
+            <p className="text-2xl sm:text-3xl font-black text-red-950 leading-none mt-1">
+              {currentOverviewData.absent} <span className="text-sm font-bold text-red-800 ml-0.5">bé</span>
+            </p>
+            <p className="text-xs font-black text-red-700 mt-1">{currentOverviewData.dateLabel}</p>
           </div>
         </div>
       </div>
 
       {/* Main Report Container */}
-      <div className="bg-white rounded-[32px] border-2 border-slate-100 p-5 sm:p-7 shadow-sm space-y-6">
+      <div className="bg-white rounded-[32px] border-2 border-slate-100 p-5 sm:p-7 shadow-xs space-y-6">
         
         {/* Controls & Sub-tabs */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
           
           {/* Sub Tab Switcher */}
-          <div className="flex items-center p-1 bg-slate-100 rounded-2xl border border-slate-200/80">
+          <div className="flex items-center p-1.5 bg-slate-100/90 rounded-2xl border border-slate-200/60 shrink-0">
             <button
               onClick={() => setReportSubTab('history')}
-              className={`px-4 py-2 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center space-x-1.5 ${
+              className={`px-4 py-2 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center space-x-2 ${
                 reportSubTab === 'history'
                   ? 'bg-white text-blue-600 shadow-xs'
-                  : 'text-slate-500 hover:text-blue-500'
+                  : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              <Calendar className="w-3.5 h-3.5" />
+              <Calendar className="w-4 h-4" />
               <span>Lịch Sử Theo Ngày</span>
             </button>
 
             <button
               onClick={() => setReportSubTab('students')}
-              className={`px-4 py-2 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center space-x-1.5 ${
+              className={`px-4 py-2 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center space-x-2 ${
                 reportSubTab === 'students'
                   ? 'bg-white text-blue-600 shadow-xs'
-                  : 'text-slate-500 hover:text-blue-500'
+                  : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              <Users className="w-3.5 h-3.5" />
+              <Users className="w-4 h-4" />
               <span>Thống Kê Theo Bé</span>
             </button>
           </div>
@@ -364,12 +483,12 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
           {/* Filter Bar */}
           <div className="flex flex-wrap items-center gap-2.5">
             {/* Class Selector Filter */}
-            <div className="flex items-center space-x-1.5 bg-slate-50 border-2 border-slate-100 rounded-2xl px-3 py-1.5">
-              <Filter className="w-3.5 h-3.5 text-slate-400" />
+            <div className="flex items-center space-x-2 bg-slate-50 border-2 border-slate-200/80 rounded-2xl px-3.5 py-2">
+              <Filter className="w-4 h-4 text-slate-500" />
               <select
                 value={selectedClass}
                 onChange={(e) => setSelectedClass(e.target.value)}
-                className="bg-transparent text-xs font-black text-slate-700 focus:outline-none appearance-none cursor-pointer pr-3"
+                className="bg-transparent text-xs font-black text-slate-800 focus:outline-none cursor-pointer pr-1"
               >
                 <option value="Tất cả">Tất cả lớp</option>
                 {CLASSES.map((cls) => (
@@ -382,52 +501,55 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
 
             {/* Date Picker (For history view) */}
             {reportSubTab === 'history' && (
-              <div className="flex items-center space-x-1.5 bg-slate-50 border-2 border-slate-100 rounded-2xl px-3 py-1.5">
-                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+              <div className="flex items-center space-x-2 bg-slate-50 border-2 border-slate-200/80 rounded-2xl px-3.5 py-2">
+                <Calendar className="w-4 h-4 text-slate-500" />
                 <input
                   type="date"
                   value={selectedDate}
                   onChange={(e) => setSelectedDate(e.target.value)}
-                  className="bg-transparent text-xs font-black text-slate-700 focus:outline-none cursor-pointer"
+                  className="bg-transparent text-xs font-black text-slate-800 focus:outline-none cursor-pointer"
                 />
-                {selectedDate && (
-                  <button
-                    onClick={() => setSelectedDate('')}
-                    className="text-[10px] font-bold text-red-500 hover:underline ml-1 cursor-pointer"
-                  >
-                    Xóa ngày
-                  </button>
-                )}
               </div>
+            )}
+
+            {selectedDate && (
+              <button
+                onClick={() => setSelectedDate('')}
+                className="flex items-center space-x-1.5 text-xs font-black text-slate-600 hover:text-red-600 bg-slate-50 hover:bg-slate-100 border-2 border-slate-200/80 rounded-2xl px-3.5 py-2 transition-all cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5 text-slate-500" />
+                <span>Xóa lọc</span>
+              </button>
             )}
 
             {/* Search & Time Filter (For student view) */}
             {reportSubTab === 'students' && (
               <>
-                <div className="flex items-center space-x-1.5 bg-slate-50 border-2 border-slate-100 rounded-2xl px-3 py-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                <div className="flex items-center space-x-2 bg-slate-50 border-2 border-slate-200/80 rounded-2xl px-3.5 py-2">
+                  <Calendar className="w-4 h-4 text-slate-500" />
                   <select
                     value={timePeriod}
                     onChange={(e) => setTimePeriod(e.target.value as any)}
-                    className="bg-transparent text-xs font-black text-slate-700 focus:outline-none appearance-none cursor-pointer pr-3"
+                    className="bg-transparent text-xs font-black text-slate-800 focus:outline-none cursor-pointer pr-1"
                   >
                     <option value="this_week">Tuần này</option>
                     <option value="this_month">Tháng này</option>
                     <option value="last_month">Tháng trước</option>
                     <option value="7_days">7 ngày qua</option>
                     <option value="30_days">30 ngày qua</option>
+                    <option value="custom">Tùy chọn (Từ ngày - Đến ngày)</option>
                     <option value="all">Tất cả thời gian</option>
                   </select>
                 </div>
 
                 <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                   <input
                     type="text"
                     placeholder="Tìm tên bé..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-8 pr-3 py-1.5 bg-slate-50 border-2 border-slate-100 rounded-2xl text-xs font-bold text-slate-700 focus:bg-white focus:border-blue-400 focus:outline-none w-36 sm:w-44"
+                    className="pl-9 pr-3.5 py-2 bg-slate-50 border-2 border-slate-200/80 rounded-2xl text-xs font-bold text-slate-800 focus:bg-white focus:border-blue-400 focus:outline-none w-36 sm:w-44"
                   />
                 </div>
               </>
@@ -437,9 +559,9 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
             <button
               onClick={handleExportCSV}
               title="Xuất file CSV báo cáo"
-              className="px-3 py-1.5 rounded-2xl bg-emerald-50 border-2 border-emerald-100 text-emerald-700 hover:bg-emerald-100 text-xs font-black transition-all cursor-pointer flex items-center space-x-1"
+              className="px-3.5 py-2 rounded-2xl bg-emerald-50 border-2 border-emerald-200 text-emerald-800 hover:bg-emerald-100 text-xs font-black transition-all cursor-pointer flex items-center space-x-1.5"
             >
-              <Download className="w-3.5 h-3.5" />
+              <Download className="w-4 h-4" />
               <span className="hidden sm:inline">Xuất CSV</span>
             </button>
 
@@ -448,7 +570,7 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
               onClick={loadData}
               disabled={isLoading}
               title="Tải lại dữ liệu từ Google Sheets"
-              className="p-2 rounded-2xl bg-slate-50 border-2 border-slate-100 text-slate-500 hover:text-blue-600 hover:bg-slate-100 transition-all cursor-pointer disabled:opacity-50"
+              className="w-10 h-10 bg-slate-50 border-2 border-slate-200/80 hover:bg-slate-100 rounded-2xl flex items-center justify-center text-slate-600 transition-all cursor-pointer disabled:opacity-50"
             >
               <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-blue-600' : ''}`} />
             </button>
@@ -514,7 +636,7 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
                           </div>
                         </div>
 
-                        {/* Badges */}
+                        {/* Badges & Delete action */}
                         <div className="flex items-center space-x-2">
                           <span
                             className={`px-3 py-1 rounded-full text-xs font-black flex items-center space-x-1 ${
@@ -527,6 +649,22 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
                           >
                             <span>Đi học: {presentCount}/{totalInClass} ({attendancePercentage}%)</span>
                           </span>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteRecord(rec);
+                            }}
+                            disabled={deletingTimestamp === (rec.timestamp || rec.date || '')}
+                            title="Xóa bản ghi điểm danh này"
+                            className="p-1.5 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 transition-all cursor-pointer border border-red-200 shrink-0 flex items-center justify-center disabled:opacity-50"
+                          >
+                            {deletingTimestamp === (rec.timestamp || rec.date || '') ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-red-600" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                          </button>
                         </div>
                       </div>
 
@@ -583,36 +721,71 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
         {reportSubTab === 'students' && (
           <div className="space-y-4">
             {/* Period Filter Bar */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 p-3 rounded-2xl border-2 border-slate-100">
-              <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
-                <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider mr-1 shrink-0">Kỳ báo cáo:</span>
-                {[
-                  { id: 'this_week', label: 'Tuần này' },
-                  { id: 'this_month', label: 'Tháng này' },
-                  { id: 'last_month', label: 'Tháng trước' },
-                  { id: '30_days', label: '30 ngày qua' },
-                  { id: 'all', label: 'Tất cả' },
-                ].map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => setTimePeriod(item.id as any)}
-                    className={`px-3 py-1.5 text-xs font-black rounded-xl transition-all cursor-pointer shrink-0 ${
-                      timePeriod === item.id
-                        ? 'bg-amber-400 text-white shadow-xs'
-                        : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
+            <div className="space-y-2.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 p-3 rounded-2xl border-2 border-slate-100">
+                <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+                  <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider mr-1 shrink-0">Kỳ báo cáo:</span>
+                  {[
+                    { id: 'this_week', label: 'Tuần này' },
+                    { id: 'this_month', label: 'Tháng này' },
+                    { id: 'last_month', label: 'Tháng trước' },
+                    { id: '30_days', label: '30 ngày qua' },
+                    { id: 'custom', label: 'Tùy chọn' },
+                    { id: 'all', label: 'Tất cả' },
+                  ].map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => setTimePeriod(item.id as any)}
+                      className={`px-3 py-1.5 text-xs font-black rounded-xl transition-all cursor-pointer shrink-0 ${
+                        timePeriod === item.id
+                          ? 'bg-amber-400 text-white shadow-xs'
+                          : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between sm:justify-end gap-2 text-xs font-black">
+                  <span className="text-slate-500">Danh sách {studentStats.length} bé ({selectedClass})</span>
+                  <span className="bg-amber-100 text-amber-800 px-2.5 py-1 rounded-xl text-[11px] font-bold shrink-0">
+                    {filteredHistoryByTime.length} lượt điểm danh
+                  </span>
+                </div>
               </div>
 
-              <div className="flex items-center justify-between sm:justify-end gap-2 text-xs font-black">
-                <span className="text-slate-500">Danh sách {studentStats.length} bé ({selectedClass})</span>
-                <span className="bg-amber-100 text-amber-800 px-2.5 py-1 rounded-xl text-[11px] font-bold shrink-0">
-                  {filteredHistoryByTime.length} lượt điểm danh
-                </span>
-              </div>
+              {/* Custom Date Inputs when 'Tùy chọn' is selected */}
+              {timePeriod === 'custom' && (
+                <div className="flex flex-wrap items-center gap-3 bg-slate-50 p-3 rounded-2xl border-2 border-slate-100 text-xs font-bold text-slate-700">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-slate-500 font-extrabold shrink-0">Từ ngày:</span>
+                    <input
+                      type="date"
+                      value={customStartDate}
+                      onChange={(e) => setCustomStartDate(e.target.value)}
+                      className="bg-white border-2 border-slate-200 rounded-xl px-2.5 py-1 text-xs font-black text-slate-700 focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-slate-500 font-extrabold shrink-0">Đến ngày:</span>
+                    <input
+                      type="date"
+                      value={customEndDate}
+                      onChange={(e) => setCustomEndDate(e.target.value)}
+                      className="bg-white border-2 border-slate-200 rounded-xl px-2.5 py-1 text-xs font-black text-slate-700 focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+                  {(customStartDate || customEndDate) && (
+                    <button
+                      onClick={() => { setCustomStartDate(''); setCustomEndDate(''); }}
+                      className="text-xs font-extrabold text-red-500 hover:underline cursor-pointer ml-auto"
+                    >
+                      Xóa ngày chọn
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {studentStats.length === 0 ? (

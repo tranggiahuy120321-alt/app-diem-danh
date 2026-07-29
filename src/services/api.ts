@@ -408,3 +408,40 @@ export async function getAttendanceHistoryApi(): Promise<{ success: boolean; dat
   return { success: false, data: [] };
 }
 
+/**
+ * Xóa bản ghi điểm danh qua Google Sheets API (POST)
+ */
+export async function deleteAttendanceApi(timestamp: string): Promise<{ success: boolean; message: string }> {
+  if (!API_URL) {
+    throw new Error('Chưa cấu hình Google Sheets API URL.');
+  }
+
+  return fetch(API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/plain;charset=utf-8'
+    },
+    redirect: 'follow',
+    body: JSON.stringify({
+      action: 'deleteAttendance',
+      timestamp: timestamp
+    })
+  })
+    .then((res) => res.text())
+    .then((text) => {
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        data = { message: text };
+      }
+
+      const isSuccess = data.status === 'success' || data.success === true || (data.message && String(data.message).toLowerCase().includes('thành công'));
+
+      return {
+        success: isSuccess,
+        message: data.message || (isSuccess ? 'Đã xóa bản ghi điểm danh thành công!' : 'Xóa bản ghi thất bại.')
+      };
+    });
+}
+
