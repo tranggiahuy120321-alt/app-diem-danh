@@ -11,21 +11,13 @@ export const getLocalStudents = (): Student[] => {
     const data = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (data) {
       const parsed: Student[] = JSON.parse(data);
-      const mockIds = new Set([
-        'STU-101', 'STU-102', 'STU-103', 'STU-104', 'STU-105', 'STU-106', 'STU-107',
-        'STU-201', 'STU-202', 'STU-203', 'STU-204', 'STU-205', 'STU-206'
-      ]);
-      const filtered = parsed.filter(s => !mockIds.has(s.id));
-      if (filtered.length !== parsed.length) {
-        saveLocalStudents(filtered);
+      if (Array.isArray(parsed)) {
+        return parsed;
       }
-      return filtered;
     }
   } catch (e) {
     console.error('Lỗi đọc dữ liệu từ localStorage', e);
   }
-  // Initialize with initial students (empty array)
-  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify([]));
   return [];
 };
 
@@ -54,28 +46,41 @@ export async function getStudentsByClass(className: string): Promise<{ success: 
     if (response.ok) {
       const json = await response.json();
       
-      // Extract array from direct array response or wrapped response { data: [...] }
-      const rawList = Array.isArray(json) 
-        ? json 
-        : (Array.isArray(json?.data) ? json.data : (Array.isArray(json?.students) ? json.students : null));
+      // Extract array from direct array response or wrapped response
+      let rawList: any[] | null = null;
+      if (Array.isArray(json)) {
+        rawList = json;
+      } else if (Array.isArray(json?.data)) {
+        rawList = json.data;
+      } else if (Array.isArray(json?.students)) {
+        rawList = json.students;
+      } else if (Array.isArray(json?.result)) {
+        rawList = json.result;
+      }
 
       if (rawList !== null) {
-        // Map backend response fields flexibly (English & Vietnamese key names)
-        const fetchedStudents: Student[] = rawList.map((item: any, index: number) => ({
-          id: String(item.id || item.ID || item.MaHocSinh || item.maHocSinh || item['Mã học sinh'] || `STU-${101 + index}`),
-          fullName: item.fullName || item.HoTen || item.hoTen || item.name || item['Họ và Tên'] || item['Họ và tên'] || item['Họ tên'] || 'Học sinh',
-          className: item.className || item.Lop || item.lop || item.class || item['Lớp'] || className || 'Mầm',
-          parentName: item.parentName || item.TenPhuHuynh || item.tenPhuHuynh || item['Tên Phụ Huynh'] || item['Phụ huynh'] || '',
-          phone: item.phone ? String(item.phone) : (item.SoDienThoai ? String(item.SoDienThoai) : (item.soDienThoai ? String(item.soDienThoai) : (item['Số Điện Thoại'] || item['SĐT'] || ''))),
-          gender: (item.gender === 'girl' || item.GioiTinh === 'girl' || item.gioiTinh === 'Nữ' || item.gioiTinh === 'gái') ? 'girl' : 'boy'
+        // Filter out completely empty rows
+        const validRows = rawList.filter((item: any) => {
+          if (!item || typeof item !== 'object') return false;
+          const name = item.fullName || item.HoTen || item.hoTen || item.name || item['Họ và Tên'] || item['Họ và tên'] || item['Họ tên'];
+          const id = item.id || item.ID || item.MaHocSinh || item.maHocSinh;
+          return Boolean(name || id);
+        });
+
+        const fetchedStudents: Student[] = validRows.map((item: any, index: number) => ({
+          id: String(item.id || item.ID || item.MaHocSinh || item.maHocSinh || item['Mã học sinh'] || item['Mã HS'] || `HS-${index + 1}`),
+          fullName: String(item.fullName || item.HoTen || item.hoTen || item.name || item['Họ và Tên'] || item['Họ và tên'] || item['Họ tên'] || 'Học sinh'),
+          className: String(item.className || item.Lop || item.lop || item.class || item['Lớp'] || 'Mầm'),
+          parentName: String(item.parentName || item.TenPhuHuynh || item.tenPhuHuynh || item['Tên Phụ Huynh'] || item['Phụ huynh'] || ''),
+          phone: String(item.phone || item.SoDienThoai || item.soDienThoai || item['Số Điện Thoại'] || item['SĐT'] || ''),
+          gender: (item.gender === 'girl' || item.GioiTinh === 'girl' || item.gioiTinh === 'Nữ' || item.gioiTinh === 'gái' || item.gioiTinh === 'girl') ? 'girl' : 'boy'
         }));
 
-        // Sync local storage with Google Sheets data if fetched items exist
+        // Update local storage cache if fetched list is non-empty
         if (fetchedStudents.length > 0) {
           saveLocalStudents(fetchedStudents);
         }
 
-        // Filter for requested class
         const filtered = fetchedStudents.filter(s => 
           !className || className === 'Tất cả' || s.className.trim().toLowerCase() === className.trim().toLowerCase()
         );
@@ -87,7 +92,7 @@ export async function getStudentsByClass(className: string): Promise<{ success: 
     console.warn('Không thể gọi API getStudents Google Sheets hoặc bị giới hạn CORS, sử dụng bộ nhớ cục bộ:', err);
   }
 
-  // Fallback to local storage / mock data
+  // Fallback to local storage
   const localList = getLocalStudents();
   const classStudents = localList.filter(s => 
     !className || className === 'Tất cả' || s.className.trim().toLowerCase() === className.trim().toLowerCase()
@@ -170,20 +175,6 @@ export async function addStudentApi(payload: AddStudentPayload): Promise<{ succe
  * Lưu kết quả điểm danh lên Google Sheets API
  */
 export async function saveAttendanceApi(payload: SaveAttendancePayload): Promise<{ success: boolean; message: string }> {
-  // Save attendance log locally
-  try {
-    const history = JSON.parse(localStorage.getItem(ATTENDANCE_HISTORY_KEY) || '[]');
-    history.unshift({
-      date: payload.date,
-      className: payload.class,
-      absentIds: payload.absentIds,
-      timestamp: new Date().toISOString()
-    });
-    localStorage.setItem(ATTENDANCE_HISTORY_KEY, JSON.stringify(history.slice(0, 50)));
-  } catch (e) {
-    console.error('Lỗi lưu lịch sử điểm danh', e);
-  }
-
   let apiSuccess = false;
   let apiMsg = '';
 
@@ -224,7 +215,7 @@ export async function saveAttendanceApi(payload: SaveAttendancePayload): Promise
     }
   } catch (err) {
     console.warn('Không thể kết nối API:', err);
-    apiMsg = 'Đã lưu bản ghi điểm danh cục bộ.';
+    apiMsg = 'Đã gửi yêu cầu lưu điểm danh.';
   }
 
   return {
@@ -293,75 +284,127 @@ export async function updateStudentApi(updatedStudent: Student): Promise<{ succe
  * Xóa học sinh khỏi danh sách
  */
 export async function deleteStudentApi(studentId: string): Promise<{ success: boolean; message: string }> {
-  // Update local storage
+  try {
+    if (API_URL) {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8',
+        },
+        body: JSON.stringify({
+          action: 'deleteStudent',
+          id: studentId,
+          ID: studentId,
+          MaHocSinh: studentId,
+        }),
+      });
+
+      if (response.ok) {
+        const text = await response.text();
+        let resJson: any = {};
+        try {
+          resJson = JSON.parse(text);
+        } catch (e) {
+          console.warn('Response từ deleteStudent không phải dạng JSON:', text);
+        }
+
+        const isSuccess = resJson.status === 'success' || resJson.success === true || text.toLowerCase().includes('success');
+
+        if (isSuccess) {
+          // Xóa ở local storage sau khi Backend Google Sheets xác nhận thành công
+          const currentStudents = getLocalStudents();
+          const updatedStudents = currentStudents.filter(s => s.id !== studentId);
+          saveLocalStudents(updatedStudents);
+
+          return {
+            success: true,
+            message: resJson.message || 'Đã xóa học sinh khỏi Google Sheets thành công!'
+          };
+        } else {
+          return {
+            success: false,
+            message: resJson.message || resJson.error || 'Xóa học sinh thất bại từ cơ sở dữ liệu Google Sheets.'
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Không thể gửi yêu cầu xóa tới API Google Sheets:', err);
+    return {
+      success: false,
+      message: 'Không thể kết nối tới Google Sheets. Vui lòng kiểm tra lại kết nối mạng.'
+    };
+  }
+
+  // Fallback nếu không cấu hình API_URL
   const currentStudents = getLocalStudents();
   const updatedStudents = currentStudents.filter(s => s.id !== studentId);
   saveLocalStudents(updatedStudents);
 
-  try {
-    // Attempt remote deletion POST request if API_URL is configured
-    await fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      },
-      body: JSON.stringify({
-        action: 'deleteStudent',
-        id: studentId,
-        ID: studentId,
-        MaHocSinh: studentId,
-      }),
-    });
-  } catch (err) {
-    console.warn('Không thể gửi Yêu cầu xóa tới API, đã xóa cục bộ:', err);
-  }
-
   return {
     success: true,
-    message: 'Đã xóa học sinh thành công!'
+    message: 'Đã xóa học sinh thành công (lưu cục bộ)!'
   };
 }
 
 /**
- * Lấy danh sách lịch sử điểm danh đã lưu
+ * Lấy danh sách lịch sử điểm danh trực tiếp từ Google Sheets API (GET)
  */
-export function getAttendanceHistory(): any[] {
+export async function getAttendanceHistoryApi(): Promise<{ success: boolean; data: any[] }> {
+  if (!API_URL) {
+    return { success: true, data: [] };
+  }
+
   try {
-    const raw = localStorage.getItem(ATTENDANCE_HISTORY_KEY);
-    if (raw) {
-      const list = JSON.parse(raw);
-      if (Array.isArray(list)) {
-        return list;
+    const separator = API_URL.includes('?') ? '&' : '?';
+    const fetchUrl = `${API_URL}${separator}action=getAttendance&t=${new Date().getTime()}`;
+
+    // TUYỆT ĐỐI KHÔNG THÊM HEADERS để tránh lỗi CORS với Google Apps Script
+    const response = await fetch(fetchUrl);
+
+    if (response.ok) {
+      const json = await response.json();
+
+      let rawList: any[] | null = null;
+      if (Array.isArray(json)) {
+        rawList = json;
+      } else if (Array.isArray(json?.data)) {
+        rawList = json.data;
+      } else if (Array.isArray(json?.history)) {
+        rawList = json.history;
+      } else if (Array.isArray(json?.result)) {
+        rawList = json.result;
+      }
+
+      if (rawList !== null) {
+        // Parse list objects and standardize keys
+        const historyData = rawList.map((item: any, idx: number) => {
+          const dateVal = String(item.date || item.Ngay || item.ngay || item.time || '');
+          const classVal = String(item.className || item.class || item.Lop || item.lop || 'Mầm');
+          const absentNamesVal = item.absentNames !== undefined 
+            ? String(item.absentNames) 
+            : (item.DanhSachVang !== undefined ? String(item.DanhSachVang) : (item.danhSachVang !== undefined ? String(item.danhSachVang) : (item.danhsachvang !== undefined ? String(item.danhsachvang) : '')));
+          const timestampVal = item.timestamp || item.Time || item.ThoiGian || item.thoiGian || new Date().toISOString();
+          const absentIdsVal = Array.isArray(item.absentIds) ? item.absentIds : [];
+
+          return {
+            id: String(item.id || item.ID || `ATT-${idx + 1}`),
+            date: dateVal,
+            className: classVal,
+            absentNames: absentNamesVal,
+            absentIds: absentIdsVal,
+            timestamp: timestampVal,
+          };
+        });
+
+        // Đảm bảo theo thứ tự mới nhất nằm trên cùng
+        return { success: true, data: historyData.reverse() };
       }
     }
-  } catch (e) {
-    console.error('Lỗi đọc lịch sử điểm danh:', e);
+  } catch (err) {
+    console.warn('Lỗi gọi API getAttendance Google Sheets:', err);
   }
 
-  return [];
-}
-
-/**
- * Xóa 1 bản ghi lịch sử điểm danh
- */
-export function deleteAttendanceHistoryRecord(idOrIndex: string | number) {
-  try {
-    const history = getAttendanceHistory();
-    const updated = history.filter((item, idx) => item.id !== idOrIndex && idx !== idOrIndex);
-    localStorage.setItem(ATTENDANCE_HISTORY_KEY, JSON.stringify(updated));
-  } catch (e) {
-    console.error('Lỗi xóa bản ghi lịch sử:', e);
-  }
-}
-
-/**
- * Xóa toàn bộ lịch sử điểm danh
- */
-export function clearAttendanceHistory() {
-  try {
-    localStorage.removeItem(ATTENDANCE_HISTORY_KEY);
-  } catch (e) {
-    console.error('Lỗi làm sạch lịch sử:', e);
-  }
+  return { success: false, data: [] };
 }
 

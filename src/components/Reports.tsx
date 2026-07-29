@@ -8,23 +8,60 @@ import {
   Search, 
   Download, 
   Phone, 
-  TrendingUp, 
-  Sparkles, 
   Filter, 
-  Trash2, 
   RefreshCw, 
-  AlertCircle, 
-  Award,
-  ChevronRight,
-  FileSpreadsheet
+  Loader2
 } from 'lucide-react';
 import { Student } from '../types';
 import { CLASSES } from '../config';
-import { getLocalStudents, getAttendanceHistory, deleteAttendanceHistoryRecord, clearAttendanceHistory } from '../services/api';
+import { getLocalStudents, getStudentsByClass, getAttendanceHistoryApi } from '../services/api';
 
 interface ReportsProps {
   addToast: (toast: { type: 'success' | 'error' | 'info'; title: string; message?: string }) => void;
 }
+
+/**
+ * Utility: Chuyển đổi chuỗi ngày thành định dạng Việt Nam bằng Date object và toLocaleDateString
+ */
+export const formatDate = (dateString?: string): string => {
+  if (!dateString) return '';
+
+  const d = new Date(dateString);
+  if (!isNaN(d.getTime())) {
+    return d.toLocaleDateString('vi-VN');
+  }
+
+  return String(dateString);
+};
+
+/**
+ * Utility: Chuyển đổi mốc thời gian (timestamp) thành định dạng giờ phút ngày local (ví dụ: Lúc 08:50 - 29/07/2026)
+ */
+export const formatTime = (dateString?: string): string => {
+  if (!dateString) return '';
+
+  const str = String(dateString).trim();
+  const d = new Date(str);
+
+  if (!isNaN(d.getTime())) {
+    const hours = d.getHours().toString().padStart(2, '0');
+    const minutes = d.getMinutes().toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, '0');
+    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+    const year = d.getFullYear();
+    return `Lúc ${hours}:${minutes} - ${day}/${month}/${year}`;
+  }
+
+  return str;
+};
+
+const isClassMatch = (studentClass: string | undefined, targetClass: string) => {
+  if (!targetClass || targetClass === 'Tất cả') return true;
+  if (!studentClass) return false;
+  const sc = studentClass.trim().toLowerCase();
+  const tc = targetClass.trim().toLowerCase();
+  return sc === tc || sc.includes(tc) || tc.includes(sc);
+};
 
 export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
   const [reportSubTab, setReportSubTab] = useState<'history' | 'students'>('history');
@@ -34,37 +71,94 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [historyList, setHistoryList] = useState<any[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  // Reload history and students
-  const loadData = () => {
-    const history = getAttendanceHistory();
-    const studentList = getLocalStudents();
-    setHistoryList(history);
-    setStudents(studentList);
+  // Load history from Google Sheets API & students list
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const [historyRes, studentListRes] = await Promise.all([
+        getAttendanceHistoryApi(),
+        getStudentsByClass('Tất cả')
+      ]);
+
+      if (historyRes.success && Array.isArray(historyRes.data)) {
+        setHistoryList(historyRes.data);
+      } else {
+        setHistoryList([]);
+      }
+
+      if (studentListRes.success && Array.isArray(studentListRes.data)) {
+        setStudents(studentListRes.data);
+      } else {
+        setStudents(getLocalStudents());
+      }
+    } catch (e) {
+      console.error('Lỗi khi tải dữ liệu báo cáo:', e);
+      addToast({ type: 'error', title: 'Lỗi kết nối', message: 'Không thể tải lịch sử điểm danh từ server.' });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
     loadData();
   }, []);
 
+  // Helper to parse array of absent student names from a history record
+  const getAbsentNamesFromRecord = (rec: any): string[] => {
+    if (rec.absentNames && typeof rec.absentNames === 'string') {
+      return rec.absentNames
+        .split(',')
+        .map((s: string) => s.trim())
+        .filter((s: string) => s.length > 0 && s !== '-' && s.toLowerCase() !== 'không' && s.toLowerCase() !== 'không có');
+    }
+    if (Array.isArray(rec.absentIds) && rec.absentIds.length > 0) {
+      return rec.absentIds.map((id: string) => {
+        const found = students.find((s) => s.id === id);
+        return found ? found.fullName : id;
+      });
+    }
+    return [];
+  };
+
   // Filter history records for date & class log
   const filteredHistory = useMemo(() => {
     return historyList.filter((item) => {
-      const matchClass = selectedClass === 'Tất cả' || item.className === selectedClass;
-      const matchDate = !selectedDate || item.date === selectedDate;
+      const matchClass = isClassMatch(item.className, selectedClass);
+      let matchDate = true;
+      if (selectedDate) {
+        const itemFormatted = formatDate(item.date);
+        const selectedFormatted = formatDate(selectedDate);
+        matchDate = itemFormatted === selectedFormatted || item.date === selectedDate;
+      }
       return matchClass && matchDate;
     });
   }, [historyList, selectedClass, selectedDate]);
 
-  // Filter history by time period (Week / Month / All)
+  // Filter history by time period
   const filteredHistoryByTime = useMemo(() => {
     const now = new Date();
 
     return historyList.filter((record) => {
       if (!record.date) return true;
-      const parts = record.date.split('-');
-      if (parts.length !== 3) return true;
-      const recDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+      let recDate = new Date(record.date);
+      
+      if (isNaN(recDate.getTime())) {
+        const cleanStr = String(record.date).trim();
+        const parts = cleanStr.split(/[-/]/);
+        if (parts.length === 3) {
+          if (parts[0].length === 4) {
+            // YYYY-MM-DD
+            recDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+          } else {
+            // DD/MM/YYYY
+            recDate = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10), 12, 0, 0);
+          }
+        }
+      }
+
+      if (isNaN(recDate.getTime())) return true;
 
       if (timePeriod === 'this_week') {
         const dayOfWeek = now.getDay();
@@ -98,7 +192,7 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
     });
   }, [historyList, timePeriod]);
 
-  // Student list mapping with attendance stats based on timePeriod
+  // Student list mapping with attendance stats
   const studentStats = useMemo(() => {
     const map = new Map<string, { student: Student; presentCount: number; absentCount: number; totalSessions: number }>();
 
@@ -109,14 +203,15 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
 
     // Compute stats from filteredHistoryByTime
     filteredHistoryByTime.forEach((record) => {
-      const classStudents = students.filter((s) => s.className === record.className);
-      const absentSet = new Set(record.absentIds || []);
+      const absentNamesList = getAbsentNamesFromRecord(record).map(n => n.toLowerCase().trim());
+      const classStudents = students.filter((s) => isClassMatch(s.className, record.className));
 
       classStudents.forEach((s) => {
         const item = map.get(s.id);
         if (item) {
           item.totalSessions += 1;
-          if (absentSet.has(s.id)) {
+          const isAbsent = absentNamesList.some(name => name === s.fullName.toLowerCase().trim());
+          if (isAbsent) {
             item.absentCount += 1;
           } else {
             item.presentCount += 1;
@@ -127,9 +222,8 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
 
     const list = Array.from(map.values());
 
-    // Filter by class and search name
     return list.filter(({ student }) => {
-      const matchClass = selectedClass === 'Tất cả' || student.className === selectedClass;
+      const matchClass = isClassMatch(student.className, selectedClass);
       const matchSearch = !searchTerm || student.fullName.toLowerCase().includes(searchTerm.toLowerCase().trim()) || (student.phone && student.phone.includes(searchTerm.trim()));
       return matchClass && matchSearch;
     });
@@ -138,15 +232,15 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
   // Overall Statistics Metrics
   const totalStudents = students.length;
   const totalSessionsRecorded = historyList.length;
-  
+
   const overallPresenceRate = useMemo(() => {
     if (historyList.length === 0 || students.length === 0) return 100;
     let totalPresent = 0;
     let totalPossible = 0;
 
     historyList.forEach((rec) => {
-      const classCount = students.filter((s) => s.className === rec.className).length || 10;
-      const absentCount = (rec.absentIds || []).length;
+      const classCount = students.filter((s) => isClassMatch(s.className, rec.className)).length || 10;
+      const absentCount = getAbsentNamesFromRecord(rec).length;
       totalPresent += Math.max(0, classCount - absentCount);
       totalPossible += classCount;
     });
@@ -166,45 +260,26 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
     csvContent += "Ngày điểm danh,Lớp,Tổng sĩ số,Số bé vắng,Số bé có mặt,Tỷ lệ hiện diện (%),Danh sách vắng\n";
 
     filteredHistory.forEach((rec) => {
-      const classStudents = students.filter((s) => s.className === rec.className);
-      const totalInClass = classStudents.length;
-      const absentCount = (rec.absentIds || []).length;
+      const classStudents = students.filter((s) => isClassMatch(s.className, rec.className));
+      const totalInClass = classStudents.length || 10;
+      const absentNamesList = getAbsentNamesFromRecord(rec);
+      const absentCount = absentNamesList.length;
       const presentCount = Math.max(0, totalInClass - absentCount);
       const rate = totalInClass > 0 ? Math.round((presentCount / totalInClass) * 100) : 100;
 
-      const absentNames = (rec.absentIds || [])
-        .map((id: string) => students.find((s) => s.id === id)?.fullName || id)
-        .join('; ');
-
-      csvContent += `"${rec.date}","${rec.className}",${totalInClass},${absentCount},${presentCount},"${rate}%","${absentNames}"\n`;
+      csvContent += `"${formatDate(rec.date)}","${rec.className}",${totalInClass},${absentCount},${presentCount},"${rate}%","${absentNamesList.join('; ')}"\n`;
     });
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `Bao_Cao_Diem_Danh_Huong_Duong_${selectedClass.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `Bao_Cao_Diem_Danh_${selectedClass.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
 
     addToast({ type: 'success', title: 'Xuất CSV thành công', message: 'Tệp báo cáo đã được tải xuống máy của bạn.' });
-  };
-
-  const handleDeleteRecord = (id: string, date: string, className: string) => {
-    if (window.confirm(`Bạn có chắc muốn xóa bản ghi điểm danh ${className} ngày ${date}?`)) {
-      deleteAttendanceHistoryRecord(id);
-      loadData();
-      addToast({ type: 'success', title: 'Đã xóa bản ghi', message: `Bản ghi ${className} ngày ${date} đã được xóa.` });
-    }
-  };
-
-  const handleClearAllHistory = () => {
-    if (window.confirm('Bạn có chắc muốn xóa TOÀN BỘ lịch sử điểm danh? Thao tác này không thể hoàn tác!')) {
-      clearAttendanceHistory();
-      loadData();
-      addToast({ type: 'info', title: 'Đã làm sạch lịch sử', message: 'Tất cả bản ghi điểm danh đã được làm mới.' });
-    }
   };
 
   return (
@@ -358,13 +433,24 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
               </>
             )}
 
+            {/* Export CSV Button */}
+            <button
+              onClick={handleExportCSV}
+              title="Xuất file CSV báo cáo"
+              className="px-3 py-1.5 rounded-2xl bg-emerald-50 border-2 border-emerald-100 text-emerald-700 hover:bg-emerald-100 text-xs font-black transition-all cursor-pointer flex items-center space-x-1"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Xuất CSV</span>
+            </button>
+
             {/* Refresh Data button */}
             <button
               onClick={loadData}
-              title="Làm mới dữ liệu"
-              className="p-2 rounded-2xl bg-slate-50 border-2 border-slate-100 text-slate-500 hover:text-blue-600 hover:bg-slate-100 transition-all cursor-pointer"
+              disabled={isLoading}
+              title="Tải lại dữ liệu từ Google Sheets"
+              className="p-2 rounded-2xl bg-slate-50 border-2 border-slate-100 text-slate-500 hover:text-blue-600 hover:bg-slate-100 transition-all cursor-pointer disabled:opacity-50"
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-blue-600' : ''}`} />
             </button>
           </div>
 
@@ -373,65 +459,62 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
         {/* SUB VIEW 1: HISTORY LOG TABLE */}
         {reportSubTab === 'history' && (
           <div className="space-y-4">
-            {filteredHistory.length === 0 ? (
+            {isLoading ? (
+              <div className="py-12 text-center space-y-3 bg-slate-50/60 rounded-3xl border-2 border-dashed border-slate-200 p-6">
+                <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto" />
+                <p className="text-sm font-black text-slate-600">Đang tải lịch sử điểm danh từ Google Sheets...</p>
+              </div>
+            ) : filteredHistory.length === 0 ? (
               <div className="py-12 text-center space-y-3 bg-slate-50/60 rounded-3xl border-2 border-dashed border-slate-200 p-6">
                 <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 font-black flex items-center justify-center mx-auto text-2xl">
                   📋
                 </div>
                 <p className="text-sm font-black text-slate-700">Chưa có lịch sử điểm danh nào phù hợp</p>
                 <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                  Hãy vào tab <strong>"Điểm Danh"</strong> và bấm nút <strong>"Lưu Điểm Danh"</strong> để ghi nhận báo cáo đầu tiên.
+                  Hãy vào tab <strong>"Điểm Danh"</strong> và bấm nút <strong>"Lưu Điểm Danh"</strong> để ghi nhận báo cáo mới.
                 </p>
               </div>
             ) : (
               <div className="space-y-3.5">
                 <div className="flex items-center justify-between text-xs font-extrabold text-slate-500 px-1">
-                  <span>Hiển thị {filteredHistory.length} bản ghi điểm danh</span>
-                  {historyList.length > 0 && (
-                    <button
-                      onClick={handleClearAllHistory}
-                      className="text-red-500 hover:text-red-700 hover:underline flex items-center space-x-1 cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Xóa lịch sử</span>
-                    </button>
-                  )}
+                  <span>Hiển thị {filteredHistory.length} bản ghi điểm danh (đồng bộ từ Google Sheets)</span>
+                  <span className="text-emerald-600 font-bold">Mới nhất nằm ở trên</span>
                 </div>
 
                 {filteredHistory.map((rec, index) => {
-                  const classStudents = students.filter((s) => s.className === rec.className);
-                  const totalInClass = classStudents.length || (rec.absentIds ? rec.absentIds.length + 5 : 10);
-                  const absentCount = (rec.absentIds || []).length;
+                  const classStudents = students.filter((s) => isClassMatch(s.className, rec.className));
+                  const totalInClass = classStudents.length || 10;
+
+                  const absentNamesList = getAbsentNamesFromRecord(rec);
+                  const absentCount = absentNamesList.length;
                   const presentCount = Math.max(0, totalInClass - absentCount);
                   const attendancePercentage = totalInClass > 0 ? Math.round((presentCount / totalInClass) * 100) : 100;
 
-                  // Find absent students details
-                  const absentStudentsList = (rec.absentIds || []).map((id: string) => {
-                    return students.find((s) => s.id === id) || { id, fullName: 'Học sinh', phone: '' };
-                  });
+                  const formattedDate = formatDate(rec.date);
+                  const formattedTime = formatTime(rec.timestamp || rec.date);
 
                   return (
                     <div
-                      key={rec.id || index}
+                      key={rec.id ? `rec-${rec.id}` : `rec-idx-${index}`}
                       className="bg-slate-50/70 hover:bg-slate-50 rounded-2xl border-2 border-slate-100 p-4 transition-all space-y-3"
                     >
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-200/60">
                         <div className="flex items-center space-x-3">
                           <span className="w-9 h-9 rounded-xl bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-sm">
-                            {rec.className === 'Lớp dưới' ? '1F' : '2F'}
+                            {rec.className?.includes('Lớp dưới') ? '1F' : '2F'}
                           </span>
                           <div>
                             <div className="flex items-center space-x-2">
-                              <h4 className="text-sm font-black text-slate-800">{rec.className}</h4>
-                              <span className="text-xs font-bold text-slate-500">• {rec.date}</span>
+                              <h4 className="text-sm font-black text-slate-800">{rec.className || 'Lớp học'}</h4>
+                              <span className="text-xs font-bold text-slate-500">• Ngày {formattedDate}</span>
                             </div>
                             <p className="text-[11px] text-slate-400 font-semibold">
-                              Lưu vào lúc: {rec.timestamp ? new Date(rec.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : 'Vừa xong'}
+                              {formattedTime ? formattedTime : `Bản ghi điểm danh ngày ${formattedDate}`}
                             </p>
                           </div>
                         </div>
 
-                        {/* Badges & Actions */}
+                        {/* Badges */}
                         <div className="flex items-center space-x-2">
                           <span
                             className={`px-3 py-1 rounded-full text-xs font-black flex items-center space-x-1 ${
@@ -444,14 +527,6 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
                           >
                             <span>Đi học: {presentCount}/{totalInClass} ({attendancePercentage}%)</span>
                           </span>
-
-                          <button
-                            onClick={() => handleDeleteRecord(rec.id || index, rec.date, rec.className)}
-                            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
-                            title="Xóa bản ghi này"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
                         </div>
                       </div>
 
@@ -469,24 +544,29 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
                               <span>Bé nghỉ học ({absentCount} bé):</span>
                             </p>
                             <div className="flex flex-wrap gap-2 pt-0.5">
-                              {absentStudentsList.map((stu: any) => (
-                                <div
-                                  key={stu.id}
-                                  className="bg-white px-2.5 py-1 rounded-xl border border-red-200 text-red-800 font-bold flex items-center space-x-1.5 shadow-2xs text-[11px]"
-                                >
-                                  <span>{stu.fullName}</span>
-                                  {stu.phone && (
-                                    <a
-                                      href={`tel:${stu.phone}`}
-                                      className="text-blue-600 hover:underline flex items-center ml-1 font-black"
-                                      title={`Gọi phụ huynh: ${stu.phone}`}
-                                    >
-                                      <Phone className="w-3 h-3 mr-0.5" />
-                                      <span>Gọi PH</span>
-                                    </a>
-                                  )}
-                                </div>
-                              ))}
+                              {absentNamesList.map((name: string, i: number) => {
+                                const foundStudent = students.find(
+                                  (s) => s.fullName.trim().toLowerCase() === name.trim().toLowerCase()
+                                );
+                                return (
+                                  <div
+                                    key={`absent-${i}-${name}`}
+                                    className="bg-white px-2.5 py-1 rounded-xl border border-red-200 text-red-800 font-bold flex items-center space-x-1.5 shadow-2xs text-[11px]"
+                                  >
+                                    <span>{name}</span>
+                                    {foundStudent?.phone && (
+                                      <a
+                                        href={`tel:${foundStudent.phone}`}
+                                        className="text-blue-600 hover:underline flex items-center ml-1 font-black"
+                                        title={`Gọi phụ huynh: ${foundStudent.phone}`}
+                                      >
+                                        <Phone className="w-3 h-3 mr-0.5" />
+                                        <span>Gọi PH</span>
+                                      </a>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
                         )}
@@ -547,7 +627,7 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
 
                   return (
                     <div
-                      key={student.id}
+                      key={student.id || `stu-${student.fullName}`}
                       className="bg-slate-50/70 hover:bg-slate-50 p-4 rounded-2xl border-2 border-slate-100 transition-all flex flex-col justify-between space-y-3"
                     >
                       <div className="flex items-start justify-between">

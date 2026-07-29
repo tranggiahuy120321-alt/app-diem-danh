@@ -132,23 +132,29 @@ export const StudentList: React.FC<StudentListProps> = ({
       if (res.success) {
         addToast({
           type: 'success',
-          title: 'Thành công',
-          message: `Đã xóa học sinh ${studentToDelete.fullName} khỏi danh sách.`,
+          title: 'Đã xóa học sinh',
+          message: res.message || `Đã xóa học sinh ${studentToDelete.fullName} thành công!`,
         });
-        loadStudents();
+        await loadStudents();
         if (onStudentDeleted) {
           onStudentDeleted();
         }
+        setStudentToDelete(null);
+      } else {
+        addToast({
+          type: 'error',
+          title: 'Xóa thất bại',
+          message: res.message || 'Không thể xóa học sinh từ cơ sở dữ liệu Google Sheets.',
+        });
       }
     } catch (error) {
       addToast({
         type: 'error',
-        title: 'Lỗi',
-        message: 'Không thể xóa học sinh. Vui lòng thử lại.',
+        title: 'Lỗi hệ thống',
+        message: 'Có lỗi xảy ra khi gửi yêu cầu xóa. Vui lòng thử lại.',
       });
     } finally {
       setIsDeleting(false);
-      setStudentToDelete(null);
     }
   };
 
