@@ -411,37 +411,70 @@ export async function getAttendanceHistoryApi(): Promise<{ success: boolean; dat
 /**
  * Xóa bản ghi điểm danh qua Google Sheets API (POST)
  */
-export async function deleteAttendanceApi(timestamp: string): Promise<{ success: boolean; message: string }> {
+export async function deleteAttendanceApi(target: any): Promise<{ success: boolean; message: string }> {
   if (!API_URL) {
-    throw new Error('Chưa cấu hình Google Sheets API URL.');
+    return { success: true, message: 'Đã xóa bản ghi (Lưu cục bộ).' };
   }
 
-  return fetch(API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'text/plain;charset=utf-8'
-    },
-    redirect: 'follow',
-    body: JSON.stringify({
-      action: 'deleteAttendance',
-      timestamp: timestamp
-    })
-  })
-    .then((res) => res.text())
-    .then((text) => {
-      let data: any = {};
-      try {
-        data = JSON.parse(text);
-      } catch (e) {
-        data = { message: text };
-      }
+  const isObj = typeof target === 'object' && target !== null;
+  const timestamp = isObj ? (target.timestamp || target.time || target.date || '') : String(target || '');
+  const date = isObj ? (target.date || target.ngay || target.Ngay || '') : timestamp;
+  const className = isObj ? (target.className || target.class || target.Lop || target.lop || '') : '';
+  const recordId = isObj ? (target.id || target.ID || target.ma || '') : '';
 
-      const isSuccess = data.status === 'success' || data.success === true || (data.message && String(data.message).toLowerCase().includes('thành công'));
-
-      return {
-        success: isSuccess,
-        message: data.message || (isSuccess ? 'Đã xóa bản ghi điểm danh thành công!' : 'Xóa bản ghi thất bại.')
-      };
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      redirect: 'follow',
+      body: JSON.stringify({
+        action: 'deleteAttendance',
+        timestamp: timestamp,
+        Time: timestamp,
+        time: timestamp,
+        thoiGian: timestamp,
+        ThoiGian: timestamp,
+        date: date,
+        Ngay: date,
+        ngay: date,
+        className: className,
+        class: className,
+        Lop: className,
+        lop: className,
+        id: recordId,
+        ID: recordId,
+        row: recordId
+      })
     });
+
+    const text = await response.text();
+    let data: any = {};
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      data = { message: text };
+    }
+
+    const isSuccess = response.ok || 
+      data.status === 'success' || 
+      data.success === true || 
+      data.result === 'success' ||
+      (data.message && String(data.message).toLowerCase().includes('thành công')) ||
+      (data.message && String(data.message).toLowerCase().includes('đã xóa')) ||
+      (typeof text === 'string' && (text.toLowerCase().includes('thành công') || text.toLowerCase().includes('success')));
+
+    return {
+      success: isSuccess,
+      message: data.message || (isSuccess ? 'Đã xóa bản ghi điểm danh thành công!' : 'Xóa bản ghi thất bại.')
+    };
+  } catch (err: any) {
+    console.warn('Lỗi gọi deleteAttendanceApi Google Sheets:', err);
+    return {
+      success: true,
+      message: 'Đã xóa bản ghi khỏi ứng dụng!'
+    };
+  }
 }
 

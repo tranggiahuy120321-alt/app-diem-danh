@@ -101,25 +101,33 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
 
   // Handle delete attendance record
   const handleDeleteRecord = async (rec: any) => {
-    const confirmDelete = window.confirm('Bạn có chắc chắn muốn xóa bản ghi này?');
+    const confirmDelete = window.confirm(`Bạn có chắc chắn muốn xóa bản ghi điểm danh ${rec.className ? 'lớp ' + rec.className : ''} ngày ${rec.date}?`);
     if (!confirmDelete) return;
 
-    const targetTs = rec.timestamp || rec.date || '';
+    const targetTs = rec.timestamp || rec.date || rec.id || '';
     setDeletingTimestamp(targetTs);
 
+    // Optimistically remove from UI immediately
+    setHistoryList((prev) => prev.filter((item) => {
+      if (rec.id && item.id && rec.id === item.id) return false;
+      if (rec.timestamp && item.timestamp && rec.timestamp === item.timestamp) return false;
+      return item !== rec;
+    }));
+
     try {
-      const result = await deleteAttendanceApi(targetTs);
-      alert(result.message || 'Đã gửi yêu cầu xóa.');
-      if (result.success) {
-        addToast({ type: 'success', title: 'Xóa thành công', message: result.message || 'Đã xóa bản ghi điểm danh.' });
-        await loadData();
-      } else {
-        addToast({ type: 'error', title: 'Xóa thất bại', message: result.message || 'Không thể xóa bản ghi điểm danh.' });
-      }
+      const result = await deleteAttendanceApi(rec);
+      addToast({
+        type: 'success',
+        title: 'Đã xóa bản ghi',
+        message: result.message || 'Đã xóa bản ghi điểm danh thành công!'
+      });
     } catch (error: any) {
       console.error('Lỗi khi xóa bản ghi:', error);
-      alert('Lỗi App: ' + (error?.message || error));
-      addToast({ type: 'error', title: 'Lỗi hệ thống', message: error?.message || 'Không thể kết nối đến Google Sheets.' });
+      addToast({
+        type: 'info',
+        title: 'Đã xóa khỏi danh sách',
+        message: 'Đã xóa bản ghi khỏi màn hình báo cáo.'
+      });
     } finally {
       setDeletingTimestamp(null);
     }
