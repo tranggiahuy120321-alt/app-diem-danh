@@ -78,6 +78,54 @@ export const formatViDate = (d: Date): string => {
   return `${day}/${month}/${year}`;
 };
 
+/**
+ * Utility: Kiểm tra bản ghi điểm danh có thuộc ngày hôm nay hay không
+ */
+export const isTodayRecord = (rec: any): boolean => {
+  if (!rec) return false;
+
+  const now = new Date();
+  const todayYear = now.getFullYear();
+  const todayMonth = now.getMonth();
+  const todayDate = now.getDate();
+
+  const val = String(rec.date || rec.timestamp || rec.created_at || '').trim();
+  if (!val) return false;
+
+  // SO SÁNH CHUỖI TRỰC TIẾP
+  const formattedTodayVi = `${todayDate.toString().padStart(2, '0')}/${(todayMonth + 1).toString().padStart(2, '0')}/${todayYear}`;
+  const formattedTodayViShort = `${todayDate}/${todayMonth + 1}/${todayYear}`;
+  const formattedTodayISO = `${todayYear}-${(todayMonth + 1).toString().padStart(2, '0')}-${todayDate.toString().padStart(2, '0')}`;
+
+  const datePart = val.split(/[\sT]+/)[0];
+  if (datePart === formattedTodayVi || datePart === formattedTodayViShort || datePart === formattedTodayISO) {
+    return true;
+  }
+
+  // THỬ PARSE DATE OBJECT
+  let recDate = new Date(val);
+  if (isNaN(recDate.getTime())) {
+    const parts = datePart.split(/[-/]/);
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        recDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+      } else {
+        recDate = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10), 12, 0, 0);
+      }
+    }
+  }
+
+  if (!isNaN(recDate.getTime())) {
+    return (
+      recDate.getFullYear() === todayYear &&
+      recDate.getMonth() === todayMonth &&
+      recDate.getDate() === todayDate
+    );
+  }
+
+  return false;
+};
+
 const isClassMatch = (studentClass: string | undefined, targetClass: string) => {
   if (!targetClass || targetClass === 'Tất cả') return true;
   if (!studentClass) return false;
@@ -101,6 +149,15 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
 
   // Handle delete attendance record
   const handleDeleteRecord = async (rec: any) => {
+    if (!isTodayRecord(rec)) {
+      addToast({
+        type: 'warning',
+        title: 'Thao tác bị chặn',
+        message: 'Chỉ được phép xóa bản ghi điểm danh trong ngày hôm nay để bảo vệ dữ liệu lịch sử.'
+      });
+      return;
+    }
+
     const confirmDelete = window.confirm(`Bạn có chắc chắn muốn xóa bản ghi điểm danh ${rec.className ? 'lớp ' + rec.className : ''} ngày ${rec.date}?`);
     if (!confirmDelete) return;
 
@@ -622,6 +679,7 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
 
                   const formattedDate = formatDate(rec.date);
                   const formattedTime = formatTime(rec.timestamp || rec.date);
+                  const isToday = isTodayRecord(rec);
 
                   return (
                     <div
@@ -658,21 +716,23 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
                             <span>Đi học: {presentCount}/{totalInClass} ({attendancePercentage}%)</span>
                           </span>
 
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteRecord(rec);
-                            }}
-                            disabled={deletingTimestamp === (rec.timestamp || rec.date || '')}
-                            title="Xóa bản ghi điểm danh này"
-                            className="p-1.5 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 transition-all cursor-pointer border border-red-200 shrink-0 flex items-center justify-center disabled:opacity-50"
-                          >
-                            {deletingTimestamp === (rec.timestamp || rec.date || '') ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin text-red-600" />
-                            ) : (
-                              <Trash2 className="w-3.5 h-3.5" />
-                            )}
-                          </button>
+                          {isToday && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteRecord(rec);
+                              }}
+                              disabled={deletingTimestamp === (rec.timestamp || rec.date || '')}
+                              title="Xóa bản ghi điểm danh này (chỉ áp dụng hôm nay)"
+                              className="p-1.5 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 transition-all cursor-pointer border border-red-200 shrink-0 flex items-center justify-center disabled:opacity-50"
+                            >
+                              {deletingTimestamp === (rec.timestamp || rec.date || '') ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-red-600" />
+                              ) : (
+                                <Trash2 className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          )}
                         </div>
                       </div>
 
