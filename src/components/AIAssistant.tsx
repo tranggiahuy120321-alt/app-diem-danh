@@ -177,7 +177,12 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ addToast }) => {
         }
       }
 
-      const res = await fetch('/api/ai-assistant', {
+      // Construct precise endpoint URL for both mobile and web environments
+      const apiUrl = typeof window !== 'undefined' && window.location?.origin
+        ? `${window.location.origin.replace(/\/$/, '')}/api/ai-assistant`
+        : '/api/ai-assistant';
+
+      const res = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
