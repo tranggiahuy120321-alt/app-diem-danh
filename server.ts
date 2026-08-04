@@ -112,7 +112,7 @@ QUY TẮC TRÌNH BÀY:
             parts: [{ text: String(prompt) }]
           });
 
-          const response = await ai.models.generateContent({
+          const geminiCall = ai.models.generateContent({
             model: 'gemini-3.6-flash',
             contents,
             config: {
@@ -120,6 +120,12 @@ QUY TẮC TRÌNH BÀY:
               temperature: 0.7,
             },
           });
+
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Gemini API timeout (4.5s)')), 4500)
+          );
+
+          const response: any = await Promise.race([geminiCall, timeoutPromise]);
 
           const replyText = response.text || 'Xin lỗi, tôi không nhận được phản hồi từ AI.';
           return res.json({ reply: replyText });

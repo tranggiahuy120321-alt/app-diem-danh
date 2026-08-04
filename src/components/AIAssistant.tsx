@@ -187,33 +187,50 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ addToast }) => {
           apiUrl = `${window.location.origin.replace(/\/$/, '')}/api/ai-assistant`;
         }
 
-        const res = await fetch(apiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: JSON.stringify({
-            prompt: promptText,
-            history: historyPayload,
-            students: payloadStudents || [],
-            attendanceHistory: payloadHistory || [],
-          }),
-        });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+          controller.abort();
+        }, 5000);
 
-        if (res.ok) {
-          const data = await res.json();
-          if (data && data.reply) {
-            assistantReply = data.reply;
+        try {
+          const res = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: JSON.stringify({
+              prompt: promptText,
+              history: historyPayload,
+              students: payloadStudents || [],
+              attendanceHistory: payloadHistory || [],
+            }),
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.reply) {
+              assistantReply = data.reply;
+            }
+          } else {
+            console.warn(`Server AI trả về mã HTTP ${res.status}`);
           }
-        } else {
-          console.warn(`Server AI trả về mã HTTP ${res.status}`);
+        } catch (fetchErr: any) {
+          clearTimeout(timeoutId);
+          if (fetchErr.name === 'AbortError') {
+            console.warn('Yêu cầu tới AI Server quá thời gian chờ (timeout 5s), lập tức chuyển sang bộ phân tích cục bộ.');
+          } else {
+            console.warn('Không thể kết nối trực tiếp API AI server, áp dụng bộ phân tích dự phòng:', fetchErr);
+          }
         }
-      } catch (networkErr) {
-        console.warn('Không thể kết nối trực tiếp API AI server, áp dụng bộ phân tích dự phòng:', networkErr);
+      } catch (outerErr: any) {
+        console.warn('Lỗi khi thiết lập yêu cầu AI API:', outerErr);
       }
 
-      // Fallback to client-side smart analyzer if API server is offline or returned error
+      // Fallback to client-side smart analyzer if API server is offline, timed out, or returned error
       if (!assistantReply) {
         assistantReply = generateLocalSmartResponse(promptText, payloadStudents || [], payloadHistory || []);
       }
