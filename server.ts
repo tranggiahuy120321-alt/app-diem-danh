@@ -65,22 +65,25 @@ ${attendanceContext}
 
 NHIỆM VỤ VÀ CÁC QUY TẮC PHÂN TÍCH THÔNG MINH BẮT BUỘC:
 
-1. TRA CỨU ĐIỂM DANH MỘT HỌC SINH CỤ THỂ (Ví dụ: "Gia Lâm hôm nay có đi học không?", "Bé Minh Nhật tuần này thế nào"):
-   - Tìm kiếm chính xác học sinh dựa vào tên (hoặc tên ngắn như "Gia Lâm", "Lâm", "Minh Nhật", v.v.) trong Dữ liệu danh sách học sinh.
-   - Xác định Lớp của bé (ví dụ: Lớp dưới, Lớp trên lầu).
-   - Kiểm tra Lịch sử điểm danh dành cho LỚP CỦA BÉ vào ngày cần tra cứu (ví dụ ngày hôm nay ${todayStrVi} / ${todayISO}):
+1. QUY TẮC ĐẶC BIỆT KHI HỎI VỀ "THỐNG KÊ NGHỈ HỌC HÔM NAY" HOẶC TỪ KHÓA TƯƠNG TỰ ("nghỉ học hôm nay", "vắng hôm nay", "ai nghỉ hôm nay", "danh sách vắng hôm nay", "điểm danh hôm nay"):
+   - BẮT BUỘC quét chính xác Dữ liệu lịch sử điểm danh của NGÀY HÔM NAY (${todayStrVi} / ${todayISO}).
+   - Liệt kê danh sách học sinh vắng mặt của TẤT CẢ CÁC LỚP trong ngày hôm nay (${todayStrVi}).
+   - Nếu đã có dữ liệu điểm danh hôm nay: Trình bày danh sách vắng của từng lớp rõ ràng. Nếu lớp nào 0 vắng thì ghi "✅ Đi học đầy đủ".
+   - Nếu chưa có dữ liệu điểm danh hôm nay: Thông báo rõ "Chưa có dữ liệu điểm danh cho ngày hôm nay (${todayStrVi}). Bạn có thể chuyển qua tab Điểm Danh để thực hiện điểm danh cho các lớp."
+   - TUYỆT ĐỐI KHÔNG tự ý chuyển sang tra cứu cá nhân một học sinh ngẫu nhiên (như bé Thọ, bé Học...) hay hiển thị báo cáo cả tuần khi người dùng đang hỏi theo ngày hôm nay!
+
+2. TRA CỨU ĐIỂM DANH MỘT HỌC SINH CỤ THỂ (Chỉ khi người dùng NÊU RÕ TÊN HỌC SINH, ví dụ: "Gia Lâm hôm nay có đi học không?", "Bé Minh Nhật tuần này thế nào"):
+   - Tìm kiếm chính xác học sinh dựa vào tên trong Dữ liệu danh sách học sinh.
+   - Xác định Lớp của bé.
+   - Kiểm tra Lịch sử điểm danh dành cho LỚP CỦA BÉ vào ngày/tuần cần tra cứu:
      + Nếu ngày đó LỚP CỦA BÉ CÓ BẢN GHI ĐIỂM DANH:
-       * Nếu tên bé NẰM TRONG danh sách vắng ('absentNames' / 'danhsachvang' / 'DanhSachVang'): Báo rõ ràng bé **VẮNG MẶT** (kèm lý do vắng nếu có).
-       * Nếu tên bé KHÔNG NẰM TRONG danh sách vắng: Kết luận dứt khoát bé **CÓ MẶT / ĐÃ ĐI HỌC** đầy đủ!
+       * Nếu tên bé NẰM TRONG danh sách vắng ('absentNames' / 'danhsachvang' / 'DanhSachVang'): Báo rõ ràng bé **VẮNG MẶT**.
+       * Nếu tên bé KHÔNG NẰM TRONG danh sách vắng: Kết luận dứt khoát bé **CÓ MẶT / ĐÃ ĐI HỌC**!
      + Nếu ngày đó lớp của bé KHÔNG CÓ BẢN GHI ĐIỂM DANH NÀO: Báo "Chưa có dữ liệu điểm danh cho lớp [Tên lớp] ngày ${todayStrVi}".
    - Khi hỏi về ĐIỂM DANH TRONG TUẦN:
-     + Thống kê 6 ngày từ THỨ HAI đến THỨ BẢY trong tuần. (Chủ Nhật là ngày nghỉ không tính).
+     + Thống kê 6 ngày từ THỨ HAI đến THỨ BẢY trong tuần.
      + Liệt kê từng ngày từ Thứ 2 đến Thứ 7: Có mặt ✅ / Vắng mặt ❌ / Chưa có dữ liệu 📋.
-     + Tổng kết số buổi đi học theo dạng: [Số buổi đi học]/6 buổi (ví dụ: 5/6 buổi, 6/6 buổi).
-
-2. TRA CỨU TỔNG QUAN VÀ BÁO CÁO NGÀY:
-   - Tra cứu đúng ngày được hỏi trong Lịch sử điểm danh.
-   - Liệt kê danh sách bé vắng mặt theo từng lớp.
+     + Tổng kết số buổi đi học theo dạng: [Số buổi đi học]/6 buổi.
 
 3. TRA CỨU SĨ SỐ LỚP VÀ PHỤ HUYNH:
    - Cung cấp sĩ số, tên phụ huynh, SĐT liên hệ từ dữ liệu học sinh khi người dùng hỏi.
@@ -130,7 +133,12 @@ QUY TẮC TRÌNH BÀY:
           const replyText = response.text || 'Xin lỗi, tôi không nhận được phản hồi từ AI.';
           return res.json({ reply: replyText });
         } catch (geminiErr: any) {
-          console.warn('Lỗi gọi Gemini API (chuyển sang phân tích dữ liệu cục bộ):', geminiErr?.message || geminiErr);
+          const errMsg = geminiErr?.message || String(geminiErr);
+          if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED')) {
+            console.warn('Gemini API hết quota/giới hạn tần suất (429) -> Tự động chuyển sang bộ phân tích cục bộ.');
+          } else {
+            console.warn('Lỗi gọi Gemini API -> Chuyển sang bộ phân tích cục bộ:', errMsg);
+          }
           const replyText = generateLocalSmartResponse(prompt, students, attendanceHistory);
           return res.json({ reply: replyText });
         }

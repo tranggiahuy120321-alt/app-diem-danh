@@ -13,6 +13,23 @@ export function generateLocalSmartResponse(promptStr: string, students: any[] = 
 
   const normQ = removeAccents(q);
 
+  const now = new Date();
+  const todayDay = now.getDate();
+  const todayMonth = now.getMonth() + 1;
+  const todayYear = now.getFullYear();
+  const todayFormattedVi = `${todayDay.toString().padStart(2, '0')}/${todayMonth.toString().padStart(2, '0')}/${todayYear}`;
+  const todayFormattedViShort = `${todayDay}/${todayMonth}/${todayYear}`;
+  const todayFormattedISO = `${todayYear}-${todayMonth.toString().padStart(2, '0')}-${todayDay.toString().padStart(2, '0')}`;
+
+  const todayTarget = {
+    year: todayYear,
+    month: todayMonth,
+    day: todayDay,
+    dateVi: todayFormattedVi,
+    dateViShort: todayFormattedViShort,
+    dateISO: todayFormattedISO,
+  };
+
   // Helper to extract date from user prompt string (e.g. 27/07/2026, 27/07, 27-07-2026, 04/08/2026)
   const extractDateFromPrompt = (str: string) => {
     const match = str.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
@@ -200,19 +217,51 @@ export function generateLocalSmartResponse(promptStr: string, students: any[] = 
     });
   };
 
-  // 0. Kiểm tra truy vấn theo ngày cụ thể (ví dụ: ngày 27/07/2026, 01/08/2026, 04/08/2026, vắng ngày 27/7)
-  const targetDatePrompt = extractDateFromPrompt(q);
-  if (targetDatePrompt && (q.includes('ngày') || q.includes('điểm danh') || q.includes('vắng') || q.includes('nghỉ') || q.includes('báo cáo') || q.includes('hôm'))) {
-    const recordsForDate = history.filter((rec) => {
-      return isRecordForTargetDate(rec, {
-        year: targetDatePrompt.year,
-        month: targetDatePrompt.month,
-        day: targetDatePrompt.day,
-        dateVi: targetDatePrompt.dateVi,
-        dateViShort: targetDatePrompt.dateViShort,
-        dateISO: targetDatePrompt.dateISO,
+  // 0. Kiểm tra truy vấn Thống kê nghỉ học hôm nay / điểm danh hôm nay / danh sách vắng hôm nay
+  const isTodayQuery =
+    normQ.includes('thong ke nghi hoc hom nay') ||
+    normQ.includes('thong ke nghi hoc') ||
+    normQ.includes('nghi hoc hom nay') ||
+    normQ.includes('vang hom nay') ||
+    normQ.includes('vang mat hom nay') ||
+    normQ.includes('ai nghi hom nay') ||
+    normQ.includes('danh sach vang hom nay') ||
+    normQ.includes('diem danh hom nay') ||
+    (normQ.includes('thong ke') && (normQ.includes('nghi') || normQ.includes('vang'))) ||
+    (normQ.includes('hom nay') && (normQ.includes('nghi') || normQ.includes('vang') || normQ.includes('diem danh')));
+
+  if (isTodayQuery) {
+    const todayRecords = history.filter((rec) => isRecordForTargetDate(rec, todayTarget));
+
+    if (todayRecords.length > 0) {
+      let detailsText = `📋 **Thống kê nghỉ học hôm nay (${todayFormattedVi}):**\n\n`;
+      let totalAbsent = 0;
+
+      todayRecords.forEach((r) => {
+        const cName = r.className || r.Lop || r.lop || 'Lớp';
+        const absentNames = String(r.absentNames || r.danhsachvang || r.DanhSachVang || '').trim();
+        const updateTime = r.timestamp || r.NgayDiemDanh || r.date || 'Hôm nay';
+
+        if (absentNames && absentNames.toLowerCase() !== 'không có' && absentNames.toLowerCase() !== 'none') {
+          detailsText += `• **${cName}**: Vắng (**${absentNames}**) — *Cập nhật lúc ${updateTime}*\n`;
+          const count = absentNames.split(',').filter(s => s.trim().length > 0).length;
+          totalAbsent += count;
+        } else {
+          detailsText += `• **${cName}**: ✅ Đi học đầy đủ (Không có học sinh vắng)\n`;
+        }
       });
-    });
+
+      detailsText += `\n📊 **Tổng kết hôm nay:** ${totalAbsent > 0 ? `Có **${totalAbsent}** bé vắng mặt.` : 'Tất cả các lớp đi học đầy đủ!'}`;
+      return detailsText;
+    } else {
+      return `📋 **Thống kê nghỉ học hôm nay (${todayFormattedVi}):**\n\nChưa có dữ liệu điểm danh nào được ghi nhận cho ngày hôm nay (${todayFormattedVi}).\n\n*(Bạn có thể chuyển qua tab **Điểm Danh** để thực hiện điểm danh cho các lớp!)*`;
+    }
+  }
+
+  // 1. Kiểm tra truy vấn theo ngày cụ thể (ví dụ: ngày 27/07/2026, 01/08/2026, 04/08/2026)
+  const targetDatePrompt = extractDateFromPrompt(q);
+  if (targetDatePrompt && (q.includes('ngày') || q.includes('điểm danh') || q.includes('vắng') || q.includes('nghỉ') || q.includes('báo cáo'))) {
+    const recordsForDate = history.filter((rec) => isRecordForTargetDate(rec, targetDatePrompt));
 
     if (recordsForDate.length === 0) {
       return `📋 **Không có dữ liệu điểm danh cho ngày ${targetDatePrompt.dateVi}.**\n\n*(Chưa có bản ghi điểm danh nào được tạo cho ngày này trong hệ thống)*`;
@@ -225,8 +274,48 @@ export function generateLocalSmartResponse(promptStr: string, students: any[] = 
     }
   }
 
-  // 1. Smart Student Extraction & Weekly Attendance Matching
-  // Scoring students based on prompt text matching
+  // 2. Hỏi theo tuần chung (ví dụ: "điểm danh tuần này", "báo cáo tuần")
+  if (q.includes('tuần') || q.includes('tất cả các ngày')) {
+    const weekDays = getWeekDays(new Date());
+    let reportText = `📅 **Báo cáo điểm danh tuần này (Thứ Hai đến Thứ Bảy):**\n\n`;
+
+    weekDays.forEach((wd) => {
+      const recs = history.filter((r) => isRecordForTargetDate(r, wd));
+
+      if (recs.length === 0) {
+        reportText += `• **${wd.dayName} (${wd.dateVi}):** Chưa có dữ liệu điểm danh\n`;
+      } else {
+        const details = recs.map((r) => `${r.className || r.Lop || 'Lớp'}: Vắng (${r.absentNames || r.danhsachvang || 'Không có'})`).join('; ');
+        reportText += `• **${wd.dayName} (${wd.dateVi}):** ${details}\n`;
+      }
+    });
+
+    return reportText;
+  }
+
+  // 3. Hỏi về tổng sĩ số / danh sách
+  if (q.includes('sĩ số') || q.includes('bao nhiêu học sinh') || q.includes('tổng số bé') || q.includes('danh sách')) {
+    const total = students.length;
+    const lopDuoi = students.filter(s => (s.className || s.Lop || '').toLowerCase().includes('dưới')).length;
+    const lopTren = students.filter(s => (s.className || s.Lop || '').toLowerCase().includes('trên')).length;
+
+    return `📊 **Thống kê sĩ số toàn trường:**
+• **Tổng số học sinh:** ${total} bé
+• **Lớp dưới:** ${lopDuoi} bé
+• **Lớp trên lầu:** ${lopTren} bé
+
+*Nhấn tab **Danh Sách Học Sinh** hoặc nhập tên bé để tra cứu chi tiết.*`;
+  }
+
+  // 4. Smart Student Extraction & Weekly Attendance Matching
+  // Vietnamese query stopwords that should NEVER match as a single-word student last name
+  const STOPWORDS = new Set([
+    'hoc', 'thong', 'nghi', 'ke', 'hom', 'nay', 'vang', 'diem', 'danh',
+    'bao', 'cao', 'si', 'so', 'tuan', 'lop', 'be', 'phu', 'huynh', 'tro',
+    'ly', 'ngay', 'sach', 'chua', 'co', 'mat', 'bao', 'nhieu', 'cho', 'tat',
+    'ca', 'tim', 'sdt', 'so', 'dien', 'thoai'
+  ]);
+
   let bestStudent: any = null;
   let maxScore = 0;
 
@@ -256,14 +345,21 @@ export function generateLocalSmartResponse(promptStr: string, students: any[] = 
           score = 90;
         }
       }
-      // Check last word if length >= 2 (e.g. "Lâm" or "Nhật")
+      // Check last word if length >= 2 and NOT in stopwords list
       if (score === 0 && words.length > 0) {
         const lastWord = words[words.length - 1];
         const normLast = removeAccents(lastWord.toLowerCase());
-        if (normLast.length >= 2) {
-          const regex = new RegExp(`\\b${normLast}\\b`, 'i');
-          if (regex.test(normQ)) {
-            score = 50;
+        if (normLast.length >= 2 && !STOPWORDS.has(normLast)) {
+          try {
+            const escapedLast = normLast.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`\\b${escapedLast}\\b`, 'i');
+            if (regex.test(normQ)) {
+              score = 50;
+            }
+          } catch {
+            if (normQ.includes(normLast)) {
+              score = 50;
+            }
           }
         }
       }
@@ -336,69 +432,11 @@ ${weekReportText}
 📊 **Tóm tắt tuần:** Số buổi đi học: **${presentCount}/6 buổi** (${presentCount} ngày có mặt, ${absentCount} ngày vắng mặt, ${noDataCount} ngày chưa có dữ liệu điểm danh).`;
   }
 
-  // 2. Hỏi theo tuần chung (ví dụ: "điểm danh tuần này", "báo cáo tuần")
-  if (q.includes('tuần') || q.includes('tất cả các ngày')) {
-    const weekDays = getWeekDays(new Date());
-    let reportText = `📅 **Báo cáo điểm danh tuần này (Thứ Hai đến Thứ Bảy):**\n\n`;
-
-    weekDays.forEach((wd) => {
-      const recs = history.filter((r) => {
-        return isRecordForTargetDate(r, {
-          year: wd.dateObj.getFullYear(),
-          month: wd.dateObj.getMonth() + 1,
-          day: wd.dateObj.getDate(),
-          dateVi: wd.dateVi,
-          dateViShort: wd.dateViShort,
-          dateISO: wd.dateISO,
-        });
-      });
-
-      if (recs.length === 0) {
-        reportText += `• **${wd.dayName} (${wd.dateVi}):** Chưa có dữ liệu điểm danh\n`;
-      } else {
-        const details = recs.map((r) => `${r.className || r.Lop || 'Lớp'}: Vắng (${r.absentNames || r.danhsachvang || 'Không có'})`).join('; ');
-        reportText += `• **${wd.dayName} (${wd.dateVi}):** ${details}\n`;
-      }
-    });
-
-    return reportText;
-  }
-
-  // 3. Hỏi về tổng sĩ số / danh sách
-  if (q.includes('sĩ số') || q.includes('bao nhiêu học sinh') || q.includes('tổng số bé') || q.includes('danh sách')) {
-    const total = students.length;
-    const lopDuoi = students.filter(s => (s.className || s.Lop || '').toLowerCase().includes('dưới')).length;
-    const lopTren = students.filter(s => (s.className || s.Lop || '').toLowerCase().includes('trên')).length;
-
-    return `📊 **Thống kê sĩ số toàn trường:**
-• **Tổng số học sinh:** ${total} bé
-• **Lớp dưới:** ${lopDuoi} bé
-• **Lớp trên lầu:** ${lopTren} bé
-
-*Nhấn tab **Danh Sách Học Sinh** hoặc nhập tên bé để tra cứu chi tiết.*`;
-  }
-
-  // 4. Hỏi về điểm danh / nghỉ học hôm nay
-  if (q.includes('điểm danh') || q.includes('vắng') || q.includes('nghỉ học') || q.includes('hôm nay')) {
-    const todayStr = new Date().toLocaleDateString('vi-VN');
-    const todayRecords = history.filter(r => r.date === todayStr || (r.date && todayStr.includes(r.date)));
-
-    if (todayRecords.length > 0) {
-      let text = `📋 **Lịch sử điểm danh hôm nay (${todayStr}):**\n`;
-      todayRecords.forEach(r => {
-        text += `• **${r.className || r.Lop || 'Lớp'}**: Vắng (${r.absentNames || r.danhsachvang || 'Không có'}) - Cập nhật lúc ${r.timestamp || r.NgayDiemDanh || r.date}\n`;
-      });
-      return text;
-    } else {
-      return `📋 Ngày **${todayStr}**: **Chưa có dữ liệu điểm danh**. Hãy chuyển qua tab **Điểm Danh** để thực hiện điểm danh cho các lớp!`;
-    }
-  }
-
   // Standard welcome / help response
   return `🤖 **Trợ Lý Hướng Dương xin chào!**
 Tôi có thể hỗ trợ bạn:
-1. **Tra cứu điểm danh theo tuần (Thứ Hai - Thứ Bảy):** Nhập tên bé (Ví dụ: *"Bé Gia Lâm tuần này có đi học không?"*) hoặc *"Điểm danh tuần này"*.
-2. **Xử lý chính xác dữ liệu:** Liệt kê đầy đủ 6 ngày từ Thứ Hai đến Thứ Bảy, báo cáo chính xác số buổi đi học (ví dụ X/6 buổi) và lọc đúng thông tin bé.
+1. **Thống kê nghỉ học hôm nay:** Bấm vào nút gợi ý hoặc gõ *"Thống kê nghỉ học hôm nay"* để xem danh sách vắng ngày hôm nay.
+2. **Tra cứu điểm danh một bé:** Nhập tên bé (Ví dụ: *"Bé Gia Lâm tuần này có đi học không?"*).
 3. **Tra cứu sĩ số & phụ huynh:** Nhập *"Sĩ số các lớp"* hoặc *"SĐT phụ huynh bé An Vy"*.
 
 Hãy gửi câu hỏi của bạn bên dưới!`;
