@@ -414,13 +414,9 @@ export const DailyAttendance: React.FC<DailyAttendanceProps> = ({
                   </div>
 
                   {/* Student Info */}
-                  <h4 className={`font-black text-base leading-tight ${isAbsent ? 'text-red-900' : 'text-slate-800'}`}>
+                  <h4 className={`font-black text-base leading-tight mb-2 ${isAbsent ? 'text-red-900' : 'text-slate-800'}`}>
                     {student.fullName}
                   </h4>
-
-                  <p className={`text-[10px] font-extrabold mb-3 uppercase tracking-wider ${isAbsent ? 'text-red-400' : 'text-slate-400'}`}>
-                    ID: #{student.id}
-                  </p>
 
                   {student.phone && (
                     <a

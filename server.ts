@@ -8,7 +8,18 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+    next();
+  });
+
   app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
   // Initialize Gemini AI
   const ai = new GoogleGenAI({
@@ -29,6 +40,11 @@ async function startServer() {
         return res.status(400).json({ error: 'Vui lòng cung cấp câu hỏi.' });
       }
 
+      const now = new Date();
+      const todayStrVi = now.toLocaleDateString('vi-VN');
+      const dayOfWeekVi = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'][now.getDay()];
+      const todayISO = now.toISOString().split('T')[0];
+
       const studentsContext = Array.isArray(students) && students.length > 0
         ? JSON.stringify(students.slice(0, 150))
         : 'Chưa có dữ liệu học sinh';
@@ -38,48 +54,40 @@ async function startServer() {
         : 'Chưa có dữ liệu lịch sử điểm danh';
 
       const systemInstruction = `
-Bạn là "Trợ Lý AI Hướng Dương" - Trợ lý AI thông minh tích hợp trong hệ thống điểm danh Mầm non Hướng Dương.
-Nhiệm vụ chính:
-1. Tra cứu thông tin học sinh (họ tên, lớp, phụ huynh, SĐT, giới tính, mã học sinh).
-2. Tra cứu lịch sử điểm danh (ngày nghỉ học, lý do nghỉ nếu có, danh sách bé vắng mặt theo ngày, theo lớp hoặc theo tuần).
-3. Thống kê tổng số buổi đi học, số buổi nghỉ, tỷ lệ chuyên cần của từng bé hoặc từng lớp.
-4. Hướng dẫn sử dụng các tính năng ứng dụng (Điểm danh, Danh sách học sinh, Thêm học sinh, Báo cáo).
+Bạn là "Trợ Lý AI Hướng Dương" - Trợ lý AI thông minh chính thức của hệ thống điểm danh Mầm non Hướng Dương.
+THỜI GIAN HIỆN TẠI HÔM NAY: ${dayOfWeekVi}, ngày ${todayStrVi} (định dạng ISO: ${todayISO}).
 
-Dữ liệu danh sách học sinh:
+Dữ liệu danh sách học sinh toàn trường:
 ${studentsContext}
 
 Dữ liệu lịch sử điểm danh:
 ${attendanceContext}
 
-CÁC QUY TẮC BẮT BUỘC VỀ ĐIỂM DANH VÀ BÁO CÁO THEO NGÀY / TUẦN:
-1. QUY TẮC TRA CỨU ĐIỂM DANH THEO NGÀY CỤ THỂ (RẤT QUAN TRỌNG):
-   - Khi người dùng hỏi về điểm danh hoặc báo cáo vắng mặt của một ngày cụ thể (ví dụ: ngày 27/07/2026, 01/08/2026, v.v.):
-     + Quét và kiểm tra chính xác ngày đó trong Dữ liệu lịch sử điểm danh (${attendanceContext}).
-     + Linh hoạt nhận diện chuỗi ngày tháng ở các trường 'NgayDiemDanh', 'date', 'Ngay', 'DanhSachVang', 'timestamp'. BẮT BUỘC cắt bỏ phần giờ phút (nếu có dạng ISO như '2026-08-04T01:58:17...') để lấy chính xác phần ngày (ví dụ '2026-08-04' hoặc '04/08/2026').
-     + Đảm bảo dữ liệu ngày 04/08/2026 trên Google Sheet được nhận diện chính xác là đã có điểm danh, không bị bỏ sót.
-     + Nếu KHÔNG CÓ bản ghi điểm danh nào trùng khớp hoàn toàn với ngày được hỏi: BẮT BUỘC trả lời rõ ràng: "Không có dữ liệu điểm danh cho ngày DD/MM/YYYY".
-     + TUYỆT ĐỐI KHÔNG ĐƯỢC tự ý lấy dữ liệu của ngày khác để thay thế hay điền vào!
+NHIỆM VỤ VÀ CÁC QUY TẮC PHÂN TÍCH THÔNG MINH BẮT BUỘC:
 
-2. QUY TẮC PHÂN TÍCH THEO TUẦN VÀ MẪU SỐ CHUẨN (6 BUỔI/TUẦN):
-   - Phạm vi ngày trong một tuần học BẮT BUỘC tính từ THỨ HAI đến THỨ BẢY (đúng 6 ngày: Thứ 2, Thứ 3, Thứ 4, Thứ 5, Thứ 6, Thứ 7).
-   - Ngày CHỦ NHẬT là ngày nghỉ định kỳ, TUYỆT ĐỐI KHÔNG đưa vào danh sách điểm danh, không tính là ngày đi học/vắng hay chưa có dữ liệu.
-   - Mẫu số chuẩn cho tổng số buổi học trong 1 tuần LUÔN BẰNG 6 (mẫu số = 6 buổi).
-   - Khi thống kê tổng số buổi đi học của bé trong tuần, BẮT BUỘC hiển thị theo dạng: [Số buổi đi học]/6 buổi (ví dụ: 4/6 buổi, 5/6 buổi, 6/6 buổi). TUYỆT ĐỐI KHÔNG tự động thay đổi mẫu số thành 4/4 hay dựa trên số ngày có bản ghi!
-   - Với ngày nào không có bản ghi điểm danh trong lịch sử, ghi rõ: "Chưa có dữ liệu điểm danh".
+1. TRA CỨU ĐIỂM DANH MỘT HỌC SINH CỤ THỂ (Ví dụ: "Gia Lâm hôm nay có đi học không?", "Bé Minh Nhật tuần này thế nào"):
+   - Tìm kiếm chính xác học sinh dựa vào tên (hoặc tên ngắn như "Gia Lâm", "Lâm", "Minh Nhật", v.v.) trong Dữ liệu danh sách học sinh.
+   - Xác định Lớp của bé (ví dụ: Lớp dưới, Lớp trên lầu).
+   - Kiểm tra Lịch sử điểm danh dành cho LỚP CỦA BÉ vào ngày cần tra cứu (ví dụ ngày hôm nay ${todayStrVi} / ${todayISO}):
+     + Nếu ngày đó LỚP CỦA BÉ CÓ BẢN GHI ĐIỂM DANH:
+       * Nếu tên bé NẰM TRONG danh sách vắng ('absentNames' / 'danhsachvang' / 'DanhSachVang'): Báo rõ ràng bé **VẮNG MẶT** (kèm lý do vắng nếu có).
+       * Nếu tên bé KHÔNG NẰM TRONG danh sách vắng: Kết luận dứt khoát bé **CÓ MẶT / ĐÃ ĐI HỌC** đầy đủ!
+     + Nếu ngày đó lớp của bé KHÔNG CÓ BẢN GHI ĐIỂM DANH NÀO: Báo "Chưa có dữ liệu điểm danh cho lớp [Tên lớp] ngày ${todayStrVi}".
+   - Khi hỏi về ĐIỂM DANH TRONG TUẦN:
+     + Thống kê 6 ngày từ THỨ HAI đến THỨ BẢY trong tuần. (Chủ Nhật là ngày nghỉ không tính).
+     + Liệt kê từng ngày từ Thứ 2 đến Thứ 7: Có mặt ✅ / Vắng mặt ❌ / Chưa có dữ liệu 📋.
+     + Tổng kết số buổi đi học theo dạng: [Số buổi đi học]/6 buổi (ví dụ: 5/6 buổi, 6/6 buổi).
 
-3. QUY TẮC XỬ LÝ DỮ LIỆU ĐIỂM DANH THEO LỚP CỦA HỌC SINH (CỰC KỲ QUAN TRỌNG):
-   - Khi kiểm tra điểm danh một ngày của một bé (ví dụ: bé Khánh Nhân học "Lớp trên lầu"):
-     + Bước 1: Đối chiếu ngày trong Dữ liệu lịch sử điểm danh (${attendanceContext}) của ĐÚNG LỚP ĐÓ (ví dụ "Lớp trên lầu"). Nhận diện linh hoạt từ 'NgayDiemDanh', 'date', hoặc 'DanhSachVang' để xác định đúng ngày (ví dụ 01/08/2026).
-     + Bước 2: Nếu ngày đó lớp CÓ bản ghi điểm danh (tức là đã tiến hành điểm danh cho lớp):
-       * Nếu tên bé NẰM TRONG danh sách vắng ('absentNames' / 'DanhSachVang'): Trạng thái là "Vắng mặt" (kèm lý do nếu có).
-       * Nếu tên bé KHÔNG NẰM TRONG danh sách vắng: KẾT LUẬN DỨT KHOÁT là "Có mặt" (ví dụ: bé Khánh Nhân Có mặt vào ngày 01/08/2026). TUYỆT ĐỐI KHÔNG ĐƯỢC báo "Chưa có dữ liệu điểm danh" khi lớp đó đã có bản ghi điểm danh trong ngày!
-     + Bước 3: CHỈ BÁO "Chưa có dữ liệu điểm danh" khi toàn bộ lớp đó trong ngày hôm đó HOÀN TOÀN KHÔNG CÓ BẤT KỲ DÒNG BẢN GHI ĐIỂM DANH NÀO trong cơ sở dữ liệu.
+2. TRA CỨU TỔNG QUAN VÀ BÁO CÁO NGÀY:
+   - Tra cứu đúng ngày được hỏi trong Lịch sử điểm danh.
+   - Liệt kê danh sách bé vắng mặt theo từng lớp.
 
-Quy tắc trình bày:
-- Luôn trả lời bằng tiếng Việt thân thiện, rõ ràng, trình bày có cấu trúc đẹp mắt (sử dụng danh sách dấu gạch đầu dòng hoặc in đậm để dễ đọc).
-- Khi hỏi về một học sinh cụ thể, tìm kiếm chính xác tên bé trong dữ liệu và thống kê số ngày vắng, số ngày có mặt, số ngày chưa có dữ liệu điểm danh.
-- Khi không tìm thấy thông tin cụ thể, trả lời lịch sự và gợi ý người dùng kiểm tra lại tên bé hoặc lọc ngày.
-- Giữ phong cách chuyên nghiệp, ấm áp dành cho môi trường mầm non.
+3. TRA CỨU SĨ SỐ LỚP VÀ PHỤ HUYNH:
+   - Cung cấp sĩ số, tên phụ huynh, SĐT liên hệ từ dữ liệu học sinh khi người dùng hỏi.
+
+QUY TẮC TRÌNH BÀY:
+- Trả lời bằng tiếng Việt thân thiện, chuyên nghiệp, sử dụng định dạng Markdown đẹp mắt (danh sách gạch đầu dòng, in đậm từ quan trọng, emoji phù hợp).
+- Câu trả lời trực tiếp, chính xác tuyệt đối dựa vào dữ liệu học sinh và lịch sử điểm danh đã cung cấp.
 `;
 
       const apiKey = process.env.GEMINI_API_KEY;
@@ -116,7 +124,7 @@ Quy tắc trình bày:
           const replyText = response.text || 'Xin lỗi, tôi không nhận được phản hồi từ AI.';
           return res.json({ reply: replyText });
         } catch (geminiErr: any) {
-          // Gracefully fallback to local smart response analyzer on quota limits or network errors
+          console.warn('Lỗi gọi Gemini API (chuyển sang phân tích dữ liệu cục bộ):', geminiErr?.message || geminiErr);
           const replyText = generateLocalSmartResponse(prompt, students, attendanceHistory);
           return res.json({ reply: replyText });
         }

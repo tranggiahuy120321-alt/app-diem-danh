@@ -181,15 +181,17 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ addToast }) => {
       let assistantReply = '';
 
       try {
-        // Construct precise endpoint URL for both mobile and web environments
-        const apiUrl = typeof window !== 'undefined' && window.location?.origin
-          ? `${window.location.origin.replace(/\/$/, '')}/api/ai-assistant`
-          : '/api/ai-assistant';
+        // Construct precise, cross-platform endpoint URL for mobile and desktop web environments
+        let apiUrl = '/api/ai-assistant';
+        if (typeof window !== 'undefined' && window.location?.origin && window.location.origin.startsWith('http')) {
+          apiUrl = `${window.location.origin.replace(/\/$/, '')}/api/ai-assistant`;
+        }
 
         const res = await fetch(apiUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'Accept': 'application/json',
           },
           body: JSON.stringify({
             prompt: promptText,
@@ -204,12 +206,14 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ addToast }) => {
           if (data && data.reply) {
             assistantReply = data.reply;
           }
+        } else {
+          console.warn(`Server AI trả về mã HTTP ${res.status}`);
         }
       } catch (networkErr) {
-        console.warn('Không thể kết nối API AI server, chuyển sang bộ phân tích cục bộ:', networkErr);
+        console.warn('Không thể kết nối trực tiếp API AI server, áp dụng bộ phân tích dự phòng:', networkErr);
       }
 
-      // Fallback to client-side smart analyzer if API returned error, 404, or failed to connect
+      // Fallback to client-side smart analyzer if API server is offline or returned error
       if (!assistantReply) {
         assistantReply = generateLocalSmartResponse(promptText, payloadStudents || [], payloadHistory || []);
       }
@@ -312,10 +316,6 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ addToast }) => {
                 <Sparkles className="w-2.5 h-2.5 mr-0.5 text-amber-600 animate-spin" /> Thông Minh
               </span>
             </h2>
-            <p className="text-xs font-semibold text-amber-950/80 flex items-center gap-1.5 mt-0.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              Sẵn sàng tra cứu {students.length} học sinh & điểm danh
-            </p>
           </div>
         </div>
 
@@ -464,9 +464,6 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ addToast }) => {
             )}
           </button>
         </form>
-        <p className="text-[10px] text-center text-slate-400 mt-2 font-medium">
-          Trợ lý AI sử dụng mô hình Gemini để tra cứu tự động thông tin học sinh & điểm danh Mầm non Hướng Dương.
-        </p>
       </div>
     </div>
   );
