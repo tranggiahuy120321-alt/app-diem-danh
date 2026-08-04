@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Student, ToastMessage } from '../types';
 import { getStudentsByClass, getAttendanceHistoryApi, getLocalStudents } from '../services/api';
+import { generateLocalSmartResponse } from '../services/aiAssistantFallback';
 
 interface Message {
   id: string;
@@ -177,30 +178,41 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ addToast }) => {
         }
       }
 
-      // Construct precise endpoint URL for both mobile and web environments
-      const apiUrl = typeof window !== 'undefined' && window.location?.origin
-        ? `${window.location.origin.replace(/\/$/, '')}/api/ai-assistant`
-        : '/api/ai-assistant';
+      let assistantReply = '';
 
-      const res = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          prompt: promptText,
-          history: historyPayload,
-          students: payloadStudents || [],
-          attendanceHistory: payloadHistory || [],
-        }),
-      });
+      try {
+        // Construct precise endpoint URL for both mobile and web environments
+        const apiUrl = typeof window !== 'undefined' && window.location?.origin
+          ? `${window.location.origin.replace(/\/$/, '')}/api/ai-assistant`
+          : '/api/ai-assistant';
 
-      if (!res.ok) {
-        throw new Error(`Server báo mã lỗi ${res.status}`);
+        const res = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            prompt: promptText,
+            history: historyPayload,
+            students: payloadStudents || [],
+            attendanceHistory: payloadHistory || [],
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.reply) {
+            assistantReply = data.reply;
+          }
+        }
+      } catch (networkErr) {
+        console.warn('Không thể kết nối API AI server, chuyển sang bộ phân tích cục bộ:', networkErr);
       }
 
-      const data = await res.json();
-      const assistantReply = data.reply || 'Không thể tạo câu trả lời.';
+      // Fallback to client-side smart analyzer if API returned error, 404, or failed to connect
+      if (!assistantReply) {
+        assistantReply = generateLocalSmartResponse(promptText, payloadStudents || [], payloadHistory || []);
+      }
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -211,22 +223,16 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ addToast }) => {
 
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (err: any) {
-      console.error('Lỗi khi hỏi AI Assistant:', err);
-      const errorMessage: Message = {
+      console.error('Lỗi khi xử lý tin nhắn AI Assistant:', err);
+      // Final resilient fallback
+      const fallbackReply = generateLocalSmartResponse(promptText, students || [], attendanceHistory || []);
+      const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `⚠️ Không thể kết nối với máy chủ AI. Hãy kiểm tra lại mạng hoặc thử lại sau.\n*(Chi tiết: ${err?.message || 'Lỗi mạng'})*`,
+        content: fallbackReply,
         timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-        isError: true,
       };
-      setMessages((prev) => [...prev, errorMessage]);
-      if (addToast) {
-        addToast({
-          type: 'error',
-          title: 'Lỗi kết nối AI',
-          message: 'Không thể tải phản hồi từ Trợ lý AI.',
-        });
-      }
+      setMessages((prev) => [...prev, assistantMessage]);
     } finally {
       setIsLoading(false);
     }

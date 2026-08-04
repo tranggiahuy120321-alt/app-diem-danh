@@ -84,35 +84,41 @@ Quy tắc trình bày:
       const apiKey = process.env.GEMINI_API_KEY;
 
       if (apiKey && apiKey.trim() !== '' && apiKey !== 'MY_GEMINI_API_KEY') {
-        const contents: any[] = [];
-        
-        if (Array.isArray(history)) {
-          for (const msg of history) {
-            if (msg.role === 'user' || msg.role === 'model') {
-              contents.push({
-                role: msg.role,
-                parts: [{ text: String(msg.content || msg.text || '') }]
-              });
+        try {
+          const contents: any[] = [];
+          
+          if (Array.isArray(history)) {
+            for (const msg of history) {
+              if (msg.role === 'user' || msg.role === 'model') {
+                contents.push({
+                  role: msg.role,
+                  parts: [{ text: String(msg.content || msg.text || '') }]
+                });
+              }
             }
           }
+
+          contents.push({
+            role: 'user',
+            parts: [{ text: String(prompt) }]
+          });
+
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.6-flash',
+            contents,
+            config: {
+              systemInstruction,
+              temperature: 0.7,
+            },
+          });
+
+          const replyText = response.text || 'Xin lỗi, tôi không nhận được phản hồi từ AI.';
+          return res.json({ reply: replyText });
+        } catch (geminiErr: any) {
+          // Gracefully fallback to local smart response analyzer on quota limits or network errors
+          const replyText = generateLocalSmartResponse(prompt, students, attendanceHistory);
+          return res.json({ reply: replyText });
         }
-
-        contents.push({
-          role: 'user',
-          parts: [{ text: String(prompt) }]
-        });
-
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.6-flash',
-          contents,
-          config: {
-            systemInstruction,
-            temperature: 0.7,
-          },
-        });
-
-        const replyText = response.text || 'Xin lỗi, tôi không nhận được phản hồi từ AI.';
-        return res.json({ reply: replyText });
       } else {
         const replyText = generateLocalSmartResponse(prompt, students, attendanceHistory);
         return res.json({ reply: replyText });
