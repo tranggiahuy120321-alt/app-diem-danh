@@ -4,6 +4,7 @@ import { DailyAttendance } from './components/DailyAttendance';
 import { AddStudent } from './components/AddStudent';
 import { StudentList } from './components/StudentList';
 import { Reports } from './components/Reports';
+import { AIAssistant } from './components/AIAssistant';
 import { ToastContainer } from './components/ToastContainer';
 import { Logo } from './components/Logo';
 import { ToastMessage, Student } from './types';
@@ -90,8 +91,10 @@ export default function App() {
             onStudentAdded={handleStudentAdded}
             addToast={addToast}
           />
-        ) : (
+        ) : activeTab === 'reports' ? (
           <Reports addToast={addToast} />
+        ) : (
+          <AIAssistant addToast={addToast} onNavigateToTab={(tab) => setActiveTab(tab as NavTab)} />
         )}
       </main>
 

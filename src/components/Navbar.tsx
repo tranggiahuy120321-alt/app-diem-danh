@@ -1,8 +1,8 @@
 import React from 'react';
-import { ClipboardCheck, Users, UserPlus, BarChart3, Sparkles } from 'lucide-react';
+import { ClipboardCheck, Users, UserPlus, BarChart3, Sparkles, Bot } from 'lucide-react';
 import { Logo } from './Logo';
 
-export type NavTab = 'attendance' | 'students' | 'addStudent' | 'reports';
+export type NavTab = 'attendance' | 'students' | 'addStudent' | 'reports' | 'aiAssistant';
 
 interface NavbarProps {
   activeTab: NavTab;
@@ -39,7 +39,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, totalSt
         <nav className="hidden sm:flex items-center p-1.5 bg-slate-100 rounded-full border border-slate-200/80">
           <button
             onClick={() => setActiveTab('attendance')}
-            className={`flex items-center px-4 lg:px-5 py-2 text-sm font-black rounded-full transition-all cursor-pointer ${
+            className={`flex items-center px-3.5 lg:px-4 py-2 text-sm font-black rounded-full transition-all cursor-pointer ${
               activeTab === 'attendance'
                 ? 'bg-white text-blue-600 shadow-sm border border-slate-200'
                 : 'text-slate-500 hover:text-blue-500'
@@ -51,7 +51,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, totalSt
 
           <button
             onClick={() => setActiveTab('students')}
-            className={`flex items-center px-4 lg:px-5 py-2 text-sm font-black rounded-full transition-all cursor-pointer ${
+            className={`flex items-center px-3.5 lg:px-4 py-2 text-sm font-black rounded-full transition-all cursor-pointer ${
               activeTab === 'students'
                 ? 'bg-white text-blue-600 shadow-sm border border-slate-200'
                 : 'text-slate-500 hover:text-blue-500'
@@ -63,7 +63,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, totalSt
 
           <button
             onClick={() => setActiveTab('addStudent')}
-            className={`flex items-center px-4 lg:px-5 py-2 text-sm font-black rounded-full transition-all cursor-pointer ${
+            className={`flex items-center px-3.5 lg:px-4 py-2 text-sm font-black rounded-full transition-all cursor-pointer ${
               activeTab === 'addStudent'
                 ? 'bg-white text-blue-600 shadow-sm border border-slate-200'
                 : 'text-slate-500 hover:text-blue-500'
@@ -75,7 +75,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, totalSt
 
           <button
             onClick={() => setActiveTab('reports')}
-            className={`flex items-center px-4 lg:px-5 py-2 text-sm font-black rounded-full transition-all cursor-pointer ${
+            className={`flex items-center px-3.5 lg:px-4 py-2 text-sm font-black rounded-full transition-all cursor-pointer ${
               activeTab === 'reports'
                 ? 'bg-white text-blue-600 shadow-sm border border-slate-200'
                 : 'text-slate-500 hover:text-blue-500'
@@ -83,6 +83,18 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, totalSt
           >
             <BarChart3 className={`w-4 h-4 mr-1.5 ${activeTab === 'reports' ? 'text-blue-600' : 'text-slate-400'}`} />
             Báo Cáo
+          </button>
+
+          <button
+            onClick={() => setActiveTab('aiAssistant')}
+            className={`flex items-center px-3.5 lg:px-4 py-2 text-sm font-black rounded-full transition-all cursor-pointer ${
+              activeTab === 'aiAssistant'
+                ? 'bg-amber-400 text-slate-900 shadow-sm border border-amber-300'
+                : 'text-amber-800 hover:text-amber-900 bg-amber-100/60'
+            }`}
+          >
+            <Bot className={`w-4 h-4 mr-1.5 ${activeTab === 'aiAssistant' ? 'text-slate-900' : 'text-amber-600'}`} />
+            Trợ Lý AI
           </button>
         </nav>
 
@@ -149,6 +161,18 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, totalSt
         >
           <BarChart3 className="w-3.5 h-3.5" />
           <span>Báo Cáo</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('aiAssistant')}
+          className={`flex-1 py-2 px-2 text-[11px] font-black rounded-full flex items-center justify-center space-x-1 transition-all whitespace-nowrap ${
+            activeTab === 'aiAssistant'
+              ? 'bg-amber-400 text-slate-900 shadow-sm'
+              : 'text-amber-800 bg-amber-100/80'
+          }`}
+        >
+          <Bot className="w-3.5 h-3.5" />
+          <span>Trợ Lý AI</span>
         </button>
       </div>
 

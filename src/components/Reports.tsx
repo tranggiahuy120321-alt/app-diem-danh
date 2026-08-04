@@ -634,7 +634,7 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
             <button
               onClick={loadData}
               disabled={isLoading}
-              title="Tải lại dữ liệu từ Google Sheets"
+              title="Tải lại dữ liệu"
               className="w-10 h-10 bg-slate-50 border-2 border-slate-200/80 hover:bg-slate-100 rounded-2xl flex items-center justify-center text-slate-600 transition-all cursor-pointer disabled:opacity-50"
             >
               <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-blue-600' : ''}`} />
@@ -649,7 +649,7 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
             {isLoading ? (
               <div className="py-12 text-center space-y-3 bg-slate-50/60 rounded-3xl border-2 border-dashed border-slate-200 p-6">
                 <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto" />
-                <p className="text-sm font-black text-slate-600">Đang tải lịch sử điểm danh từ Google Sheets...</p>
+                <p className="text-sm font-black text-slate-600">Đang tải dữ liệu</p>
               </div>
             ) : filteredHistory.length === 0 ? (
               <div className="py-12 text-center space-y-3 bg-slate-50/60 rounded-3xl border-2 border-dashed border-slate-200 p-6">
@@ -664,7 +664,7 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
             ) : (
               <div className="space-y-3.5">
                 <div className="flex items-center justify-between text-xs font-extrabold text-slate-500 px-1">
-                  <span>Hiển thị {filteredHistory.length} bản ghi điểm danh (đồng bộ từ Google Sheets)</span>
+                  <span>Hiển thị {filteredHistory.length} bản ghi điểm danh</span>
                   <span className="text-emerald-600 font-bold">Mới nhất nằm ở trên</span>
                 </div>
 

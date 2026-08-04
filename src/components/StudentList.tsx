@@ -144,7 +144,7 @@ export const StudentList: React.FC<StudentListProps> = ({
         addToast({
           type: 'error',
           title: 'Xóa thất bại',
-          message: res.message || 'Không thể xóa học sinh từ cơ sở dữ liệu Google Sheets.',
+          message: res.message || 'Không thể xóa học sinh từ cơ sở dữ liệu.',
         });
       }
     } catch (error) {
