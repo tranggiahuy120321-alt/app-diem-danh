@@ -379,11 +379,34 @@ export async function getAttendanceHistoryApi(): Promise<{ success: boolean; dat
       if (rawList !== null) {
         // Parse list objects and standardize keys
         const historyData = rawList.map((item: any, idx: number) => {
-          const dateVal = String(item.date || item.Ngay || item.ngay || item.time || '');
-          const classVal = String(item.className || item.class || item.Lop || item.lop || 'Mầm');
+          const dateVal = String(
+            item.date ||
+            item.Date ||
+            item.Ngay ||
+            item.ngay ||
+            item.NgayDiemDanh ||
+            item.ngayDiemDanh ||
+            item['Ngày'] ||
+            item['Ngày điểm danh'] ||
+            item['Ngay'] ||
+            item['Cột B'] ||
+            item['colB'] ||
+            item.time ||
+            item.Time ||
+            item.timestamp ||
+            ''
+          );
+          const classVal = String(
+            item.className ||
+            item.class ||
+            item.Lop ||
+            item.lop ||
+            item['Lớp'] ||
+            'Mầm'
+          );
           const absentNamesVal = item.absentNames !== undefined 
             ? String(item.absentNames) 
-            : (item.DanhSachVang !== undefined ? String(item.DanhSachVang) : (item.danhSachVang !== undefined ? String(item.danhSachVang) : (item.danhsachvang !== undefined ? String(item.danhsachvang) : '')));
+            : (item.DanhSachVang !== undefined ? String(item.DanhSachVang) : (item.danhSachVang !== undefined ? String(item.danhSachVang) : (item.danhsachvang !== undefined ? String(item.danhsachvang) : (item['Danh sách vắng'] !== undefined ? String(item['Danh sách vắng']) : ''))));
           const timestampVal = item.timestamp || item.Time || item.ThoiGian || item.thoiGian || new Date().toISOString();
           const absentIdsVal = Array.isArray(item.absentIds) ? item.absentIds : [];
 
@@ -476,5 +499,60 @@ export async function deleteAttendanceApi(target: any): Promise<{ success: boole
       message: 'Đã xóa bản ghi khỏi ứng dụng!'
     };
   }
+}
+
+/**
+ * Lấy URL tuyệt đối chuẩn cho endpoint AI Assistant trên cả desktop và thiết bị di động
+ */
+export function getAIAssistantApiUrl(): string {
+  if (typeof window !== 'undefined' && window.location?.origin && window.location.origin.startsWith('http')) {
+    return `${window.location.origin.replace(/\/$/, '')}/api/ai-assistant`;
+  }
+  return '/api/ai-assistant';
+}
+
+/**
+ * Gửi yêu cầu phân tích AI tới backend server với AbortController timeout 5 giây và xử lý lỗi đồng bộ
+ */
+export async function sendAIAssistantApi(payload: {
+  prompt: string;
+  history?: any[];
+  students?: Student[];
+  attendanceHistory?: any[];
+}): Promise<{ success: boolean; reply: string }> {
+  const apiUrl = getAIAssistantApiUrl();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const res = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.reply) {
+        return { success: true, reply: data.reply };
+      }
+    }
+    console.warn(`AI Assistant API trả về mã HTTP ${res.status}`);
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      console.warn('AI Assistant API quá thời gian chờ (timeout 10s), chuyển sang bộ phân tích cục bộ.');
+    } else {
+      console.warn('Không thể kết nối AI Assistant API server:', err);
+    }
+  }
+
+  return { success: false, reply: '' };
 }
 

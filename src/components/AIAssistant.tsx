@@ -17,7 +17,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { Student, ToastMessage } from '../types';
-import { getStudentsByClass, getAttendanceHistoryApi, getLocalStudents } from '../services/api';
+import { getStudentsByClass, getAttendanceHistoryApi, getLocalStudents, sendAIAssistantApi } from '../services/api';
 import { generateLocalSmartResponse } from '../services/aiAssistantFallback';
 
 interface Message {
@@ -181,53 +181,18 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ addToast }) => {
       let assistantReply = '';
 
       try {
-        // Construct precise, cross-platform endpoint URL for mobile and desktop web environments
-        let apiUrl = '/api/ai-assistant';
-        if (typeof window !== 'undefined' && window.location?.origin && window.location.origin.startsWith('http')) {
-          apiUrl = `${window.location.origin.replace(/\/$/, '')}/api/ai-assistant`;
-        }
+        const apiResult = await sendAIAssistantApi({
+          prompt: promptText,
+          history: historyPayload,
+          students: payloadStudents || [],
+          attendanceHistory: payloadHistory || [],
+        });
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => {
-          controller.abort();
-        }, 5000);
-
-        try {
-          const res = await fetch(apiUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: JSON.stringify({
-              prompt: promptText,
-              history: historyPayload,
-              students: payloadStudents || [],
-              attendanceHistory: payloadHistory || [],
-            }),
-            signal: controller.signal,
-          });
-
-          clearTimeout(timeoutId);
-
-          if (res.ok) {
-            const data = await res.json();
-            if (data && data.reply) {
-              assistantReply = data.reply;
-            }
-          } else {
-            console.warn(`Server AI trả về mã HTTP ${res.status}`);
-          }
-        } catch (fetchErr: any) {
-          clearTimeout(timeoutId);
-          if (fetchErr.name === 'AbortError') {
-            console.warn('Yêu cầu tới AI Server quá thời gian chờ (timeout 5s), lập tức chuyển sang bộ phân tích cục bộ.');
-          } else {
-            console.warn('Không thể kết nối trực tiếp API AI server, áp dụng bộ phân tích dự phòng:', fetchErr);
-          }
+        if (apiResult.success && apiResult.reply) {
+          assistantReply = apiResult.reply;
         }
       } catch (outerErr: any) {
-        console.warn('Lỗi khi thiết lập yêu cầu AI API:', outerErr);
+        console.warn('Lỗi khi gửi yêu cầu AI Assistant API:', outerErr);
       }
 
       // Fallback to client-side smart analyzer if API server is offline, timed out, or returned error

@@ -54,22 +54,66 @@ export function generateLocalSmartResponse(promptStr: string, students: any[] = 
     return null;
   };
 
+  // Helper to extract reference date object for week calculations from user prompt
+  const extractRefDateFromPrompt = (str: string): Date | null => {
+    const norm = removeAccents(str.toLowerCase());
+
+    // 1. Look for explicit date numbers in prompt e.g. 27/07/2026 or 27/07 or 01/08
+    const matches = [...str.matchAll(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/g)];
+    if (matches.length > 0) {
+      const firstMatch = matches[0];
+      const day = parseInt(firstMatch[1], 10);
+      const month = parseInt(firstMatch[2], 10);
+      let year = firstMatch[3] ? parseInt(firstMatch[3], 10) : 2026;
+      if (year < 100) year += 2000;
+
+      if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+        return new Date(year, month - 1, day);
+      }
+    }
+
+    // 2. Look for month/period text like "cuoi thang 7", "tuan cuoi thang 7", "thang 7", "thang 07", "t7"
+    if (
+      norm.includes('cuoi thang 7') ||
+      norm.includes('tuan cuoi thang 7') ||
+      norm.includes('cuoi t7') ||
+      norm.includes('thang 7') ||
+      norm.includes('thang 07') ||
+      norm.includes('t7')
+    ) {
+      return new Date(2026, 6, 27); // 27/07/2026 (July 27, 2026 - Monday of late July week)
+    }
+
+    if (
+      norm.includes('cuoi thang 8') ||
+      norm.includes('tuan cuoi thang 8') ||
+      norm.includes('cuoi t8') ||
+      norm.includes('thang 8') ||
+      norm.includes('thang 08') ||
+      norm.includes('t8')
+    ) {
+      return new Date(2026, 7, 24); // 24/08/2026
+    }
+
+    return null;
+  };
+
   // Helper to extract all possible date objects/strings from a record object
   const extractDatesFromRecord = (rec: any) => {
     if (!rec) return [];
     const results: Array<{ day: number; month: number; year: number; dateVi: string; dateViShort: string; dateISO: string; datePart: string }> = [];
 
     const candidateFields = [
+      rec.date,
+      rec.Date,
+      rec.Ngay,
+      rec.ngay,
       rec.NgayDiemDanh,
       rec.ngayDiemDanh,
       rec.dateDiemDanh,
-      rec.date,
-      rec.Date,
-      rec.ngay,
-      rec.Ngay,
-      rec.DanhSachVang,
-      rec.danhsachvang,
-      rec.absentNames,
+      rec['Ngày'],
+      rec['Ngày điểm danh'],
+      rec['Cột B'],
       rec.timestamp,
       rec.Timestamp,
       rec.created_at,
@@ -79,56 +123,75 @@ export function generateLocalSmartResponse(promptStr: string, students: any[] = 
 
     const seenKeys = new Set<string>();
 
+    const addDate = (day: number, month: number, year: number) => {
+      if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2000) {
+        const dayFormattedVi = `${day.toString().padStart(2, '0')}/${month.toString().padStart(2, '0')}/${year}`;
+        const dayFormattedViShort = `${day}/${month}/${year}`;
+        const dayFormattedISO = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+        const key = `${year}-${month}-${day}`;
+
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          results.push({
+            day,
+            month,
+            year,
+            dateVi: dayFormattedVi,
+            dateViShort: dayFormattedViShort,
+            dateISO: dayFormattedISO,
+            datePart: dayFormattedVi,
+          });
+        }
+      }
+    };
+
     for (const fieldVal of candidateFields) {
       if (!fieldVal) continue;
+
+      if (fieldVal instanceof Date) {
+        addDate(fieldVal.getDate(), fieldVal.getMonth() + 1, fieldVal.getFullYear());
+        continue;
+      }
+
+      if (typeof fieldVal === 'number' && fieldVal > 1000000000000) {
+        const d = new Date(fieldVal);
+        if (!isNaN(d.getTime())) {
+          addDate(d.getDate(), d.getMonth() + 1, d.getFullYear());
+        }
+        continue;
+      }
+
       const rawStr = String(fieldVal).trim();
       if (!rawStr) continue;
 
-      // Cut off time component if present (e.g. 2026-08-04T01:58:17... -> 2026-08-04, 04/08/2026 01:58:17 -> 04/08/2026)
-      const cleanStr = rawStr.split(/[\sT,]+/)[0];
-      const strNormalized = rawStr.replace(/T/g, ' ');
-
-      const targets = [cleanStr, strNormalized];
-
-      for (const targetStr of targets) {
-        const matches = targetStr.matchAll(/\b(\d{1,4})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/g);
-        for (const match of matches) {
-          let p1 = parseInt(match[1], 10);
-          let p2 = parseInt(match[2], 10);
-          let p3 = match[3] ? parseInt(match[3], 10) : new Date().getFullYear();
-
-          let day = 0, month = 0, year = 0;
-
-          if (p1 > 1000) {
-            year = p1;
-            month = p2;
-            day = p3;
-          } else {
-            day = p1;
-            month = p2;
-            year = p3 < 100 ? p3 + 2000 : p3;
-          }
-
-          if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2000) {
-            const dayFormattedVi = `${day.toString().padStart(2, '0')}/${month.toString().padStart(2, '0')}/${year}`;
-            const dayFormattedViShort = `${day}/${month}/${year}`;
-            const dayFormattedISO = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-            const key = `${year}-${month}-${day}`;
-
-            if (!seenKeys.has(key)) {
-              seenKeys.add(key);
-              results.push({
-                day,
-                month,
-                year,
-                dateVi: dayFormattedVi,
-                dateViShort: dayFormattedViShort,
-                dateISO: dayFormattedISO,
-                datePart: dayFormattedVi,
-              });
-            }
-          }
+      // 1. Try parsing ISO/Date strings like 2026-07-31T08:30:00.000Z or 2026-07-31 08:30:00
+      if (rawStr.includes('T') || rawStr.includes('-') || rawStr.includes('/')) {
+        const parsedIso = new Date(rawStr);
+        if (!isNaN(parsedIso.getTime()) && parsedIso.getFullYear() >= 2000) {
+          addDate(parsedIso.getDate(), parsedIso.getMonth() + 1, parsedIso.getFullYear());
         }
+      }
+
+      // 2. Extract patterns via regex: 28/07/2026, 28/7/2026, 2026-07-28, 28-07-2026, 28/07
+      const matches = [...rawStr.matchAll(/(\d{1,4})[/-](\d{1,2})(?:[/-](\d{2,4}))?/g)];
+      for (const match of matches) {
+        let p1 = parseInt(match[1], 10);
+        let p2 = parseInt(match[2], 10);
+        let p3 = match[3] ? parseInt(match[3], 10) : 2026;
+
+        let day = 0, month = 0, year = 0;
+
+        if (p1 > 1000) {
+          year = p1;
+          month = p2;
+          day = p3;
+        } else {
+          day = p1;
+          month = p2;
+          year = p3 < 100 ? p3 + 2000 : p3;
+        }
+
+        addDate(day, month, year);
       }
     }
 
@@ -142,19 +205,10 @@ export function generateLocalSmartResponse(promptStr: string, students: any[] = 
   ) => {
     if (!rec) return false;
 
-    if (className) {
-      const recClass = String(rec.className || rec.Lop || rec.lop || '').trim().toLowerCase();
-      const targetClass = String(className).trim().toLowerCase();
-      if (recClass && targetClass && recClass !== 'tất cả') {
-        const isMatch = recClass === targetClass || recClass.includes(targetClass) || targetClass.includes(recClass);
-        if (!isMatch) return false;
-      }
-    }
-
     const recordDates = extractDatesFromRecord(rec);
     if (recordDates.length === 0) return false;
 
-    return recordDates.some((rd) => {
+    const dateMatches = recordDates.some((rd) => {
       return (
         (rd.year === target.year && rd.month === target.month && rd.day === target.day) ||
         (target.dateVi && (rd.dateVi === target.dateVi || rd.datePart === target.dateVi)) ||
@@ -162,6 +216,19 @@ export function generateLocalSmartResponse(promptStr: string, students: any[] = 
         (target.dateISO && (rd.dateISO === target.dateISO || rd.datePart === target.dateISO))
       );
     });
+
+    if (!dateMatches) return false;
+
+    if (className) {
+      const recClass = String(rec.className || rec.Lop || rec.lop || '').trim().toLowerCase();
+      const targetClass = String(className).trim().toLowerCase();
+      if (recClass && targetClass && recClass !== 'tất cả' && recClass !== 'toàn trường' && targetClass !== 'tất cả') {
+        const isMatch = recClass === targetClass || recClass.includes(targetClass) || targetClass.includes(recClass);
+        if (!isMatch) return false;
+      }
+    }
+
+    return true;
   };
 
   // Helper functions for Monday to Saturday week calculation (6 days, excluding Sunday)
@@ -188,47 +255,40 @@ export function generateLocalSmartResponse(promptStr: string, students: any[] = 
     return days;
   };
 
-  const findRecordForDay = (targetDay: { dateObj: Date; dateVi: string; dateViShort: string; dateISO: string }, className?: string) => {
-    // 1. Try class-specific match first
-    if (className) {
-      const match = history.find((rec) =>
-        isRecordForTargetDate(rec, {
-          year: targetDay.dateObj.getFullYear(),
-          month: targetDay.dateObj.getMonth() + 1,
-          day: targetDay.dateObj.getDate(),
-          dateVi: targetDay.dateVi,
-          dateViShort: targetDay.dateViShort,
-          dateISO: targetDay.dateISO,
-        }, className)
-      );
-      if (match) return match;
+  const findRecordsForDay = (targetDay: { dateObj: Date; dateVi: string; dateViShort: string; dateISO: string }, className?: string) => {
+    const target = {
+      year: targetDay.dateObj.getFullYear(),
+      month: targetDay.dateObj.getMonth() + 1,
+      day: targetDay.dateObj.getDate(),
+      dateVi: targetDay.dateVi,
+      dateViShort: targetDay.dateViShort,
+      dateISO: targetDay.dateISO,
+    };
+
+    // 1. Check all records matching date
+    const dayRecords = history.filter((rec) => isRecordForTargetDate(rec, target));
+    if (dayRecords.length === 0) return [];
+
+    // 2. If a specific class is requested, require matching class records (returns [] if student's class wasn't checked in)
+    if (className && className !== 'Chưa rõ lớp' && className !== 'Tất cả' && className !== 'Toàn trường') {
+      const classMatches = dayRecords.filter((rec) => isRecordForTargetDate(rec, target, className));
+      return classMatches;
     }
 
-    // 2. Fallback to any class record for that day
-    return history.find((rec) => {
-      return isRecordForTargetDate(rec, {
-        year: targetDay.dateObj.getFullYear(),
-        month: targetDay.dateObj.getMonth() + 1,
-        day: targetDay.dateObj.getDate(),
-        dateVi: targetDay.dateVi,
-        dateViShort: targetDay.dateViShort,
-        dateISO: targetDay.dateISO,
-      });
-    });
+    return dayRecords;
   };
 
   // 0. Kiểm tra truy vấn Thống kê nghỉ học hôm nay / điểm danh hôm nay / danh sách vắng hôm nay
   const isTodayQuery =
-    normQ.includes('thong ke nghi hoc hom nay') ||
+    (normQ.includes('thong ke nghi hoc hom nay') ||
     normQ.includes('thong ke nghi hoc') ||
     normQ.includes('nghi hoc hom nay') ||
     normQ.includes('vang hom nay') ||
     normQ.includes('vang mat hom nay') ||
     normQ.includes('ai nghi hom nay') ||
     normQ.includes('danh sach vang hom nay') ||
-    normQ.includes('diem danh hom nay') ||
-    (normQ.includes('thong ke') && (normQ.includes('nghi') || normQ.includes('vang'))) ||
-    (normQ.includes('hom nay') && (normQ.includes('nghi') || normQ.includes('vang') || normQ.includes('diem danh')));
+    normQ.includes('diem danh hom nay')) &&
+    !normQ.includes('be ') && !normQ.includes('hoc sinh ');
 
   if (isTodayQuery) {
     const todayRecords = history.filter((rec) => isRecordForTargetDate(rec, todayTarget));
@@ -258,9 +318,10 @@ export function generateLocalSmartResponse(promptStr: string, students: any[] = 
     }
   }
 
-  // 1. Kiểm tra truy vấn theo ngày cụ thể (ví dụ: ngày 27/07/2026, 01/08/2026, 04/08/2026)
+  // 1. Kiểm tra truy vấn theo ngày cụ thể (ví dụ: ngày 27/07/2026, 01/08/2026, 04/08/2026) khi không hỏi khoảng tuần
   const targetDatePrompt = extractDateFromPrompt(q);
-  if (targetDatePrompt && (q.includes('ngày') || q.includes('điểm danh') || q.includes('vắng') || q.includes('nghỉ') || q.includes('báo cáo'))) {
+  const isWeekOrRangeQuery = normQ.includes('tuan') || normQ.includes('den') || normQ.includes('tu') || normQ.includes('-') || normQ.includes('khoang');
+  if (targetDatePrompt && (q.includes('ngày') || q.includes('điểm danh') || q.includes('vắng') || q.includes('nghỉ') || q.includes('báo cáo')) && !isWeekOrRangeQuery) {
     const recordsForDate = history.filter((rec) => isRecordForTargetDate(rec, targetDatePrompt));
 
     if (recordsForDate.length === 0) {
@@ -274,41 +335,7 @@ export function generateLocalSmartResponse(promptStr: string, students: any[] = 
     }
   }
 
-  // 2. Hỏi theo tuần chung (ví dụ: "điểm danh tuần này", "báo cáo tuần")
-  if (q.includes('tuần') || q.includes('tất cả các ngày')) {
-    const weekDays = getWeekDays(new Date());
-    let reportText = `📅 **Báo cáo điểm danh tuần này (Thứ Hai đến Thứ Bảy):**\n\n`;
-
-    weekDays.forEach((wd) => {
-      const recs = history.filter((r) => isRecordForTargetDate(r, wd));
-
-      if (recs.length === 0) {
-        reportText += `• **${wd.dayName} (${wd.dateVi}):** Chưa có dữ liệu điểm danh\n`;
-      } else {
-        const details = recs.map((r) => `${r.className || r.Lop || 'Lớp'}: Vắng (${r.absentNames || r.danhsachvang || 'Không có'})`).join('; ');
-        reportText += `• **${wd.dayName} (${wd.dateVi}):** ${details}\n`;
-      }
-    });
-
-    return reportText;
-  }
-
-  // 3. Hỏi về tổng sĩ số / danh sách
-  if (q.includes('sĩ số') || q.includes('bao nhiêu học sinh') || q.includes('tổng số bé') || q.includes('danh sách')) {
-    const total = students.length;
-    const lopDuoi = students.filter(s => (s.className || s.Lop || '').toLowerCase().includes('dưới')).length;
-    const lopTren = students.filter(s => (s.className || s.Lop || '').toLowerCase().includes('trên')).length;
-
-    return `📊 **Thống kê sĩ số toàn trường:**
-• **Tổng số học sinh:** ${total} bé
-• **Lớp dưới:** ${lopDuoi} bé
-• **Lớp trên lầu:** ${lopTren} bé
-
-*Nhấn tab **Danh Sách Học Sinh** hoặc nhập tên bé để tra cứu chi tiết.*`;
-  }
-
-  // 4. Smart Student Extraction & Weekly Attendance Matching
-  // Vietnamese query stopwords that should NEVER match as a single-word student last name
+  // 2. Tra cứu học sinh cá nhân (Ưu tiên số 1 khi người dùng nhắc tên học sinh, ví dụ: "Gia Lâm tuần cuối tháng 7", "Bé Minh Nhật", "Trần Gia Lâm")
   const STOPWORDS = new Set([
     'hoc', 'thong', 'nghi', 'ke', 'hom', 'nay', 'vang', 'diem', 'danh',
     'bao', 'cao', 'si', 'so', 'tuan', 'lop', 'be', 'phu', 'huynh', 'tro',
@@ -390,27 +417,42 @@ export function generateLocalSmartResponse(promptStr: string, students: any[] = 
     const shortName = words.length >= 2 ? words.slice(-2).join(' ') : name;
 
     // Calculate weekly attendance (Monday to Saturday - 6 days)
-    const weekDays = getWeekDays(new Date());
+    const refDate = extractRefDateFromPrompt(promptStr);
+    const weekDays = getWeekDays(refDate || new Date());
+    const startDateVi = weekDays[0].dateVi;
+    const endDateVi = weekDays[5].dateVi;
+
+    const weekTitle = refDate
+      ? `tuần từ ${startDateVi} đến ${endDateVi}`
+      : `tuần này (${startDateVi} đến ${endDateVi})`;
+
     let weekReportText = '';
     let absentCount = 0;
     let presentCount = 0;
     let noDataCount = 0;
 
     weekDays.forEach((wd) => {
-      const rec = findRecordForDay(wd, cName);
-      if (!rec) {
+      const dayRecs = findRecordsForDay(wd, cName);
+      if (dayRecs.length === 0) {
         noDataCount++;
         weekReportText += `• **${wd.dayName} (${wd.dateVi}):** Chưa có dữ liệu điểm danh\n`;
       } else {
-        const absentNames = String(rec.absentNames || rec.danhsachvang || rec.DanhSachVang || '');
-        const normAbsent = removeAccents(absentNames.toLowerCase());
         const normFull = removeAccents(name.toLowerCase());
         const normShort = removeAccents(shortName.toLowerCase());
+        const lastWord = words.length > 0 ? removeAccents(words[words.length - 1].toLowerCase()) : '';
 
-        // Check if student is listed as absent
-        const isAbsent = normAbsent.includes(normFull) || normAbsent.includes(normShort) || (
-          words.length > 0 && normAbsent.includes(removeAccents(words[words.length - 1].toLowerCase()))
-        );
+        // Check if student is listed as absent in ANY matching record of that day
+        const isAbsent = dayRecs.some((r) => {
+          const absentNames = String(r.absentNames || r.danhsachvang || r.DanhSachVang || r['Danh sách vắng'] || '');
+          const normAbsent = removeAccents(absentNames.toLowerCase());
+          if (!normAbsent || normAbsent === 'khong co' || normAbsent === 'none' || normAbsent === '0' || normAbsent === 'khong') return false;
+
+          return (
+            normAbsent.includes(normFull) ||
+            normAbsent.includes(normShort) ||
+            (lastWord.length >= 2 && normAbsent.includes(lastWord))
+          );
+        });
 
         if (isAbsent) {
           absentCount++;
@@ -427,9 +469,50 @@ export function generateLocalSmartResponse(promptStr: string, students: any[] = 
 • **Phụ huynh:** ${parent}
 • **SĐT liên hệ:** ${phone}
 
-📅 **Chi tiết điểm danh tuần này (Thứ Hai đến Thứ Bảy):**
+📅 **Chi tiết điểm danh ${weekTitle}:**
 ${weekReportText}
 📊 **Tóm tắt tuần:** Số buổi đi học: **${presentCount}/6 buổi** (${presentCount} ngày có mặt, ${absentCount} ngày vắng mặt, ${noDataCount} ngày chưa có dữ liệu điểm danh).`;
+  }
+
+  // 3. Hỏi theo tuần chung toàn trường (khi không tìm thấy học sinh cá nhân)
+  if (q.includes('tuần') || q.includes('tất cả các ngày') || normQ.includes('tuan')) {
+    const refDate = extractRefDateFromPrompt(promptStr);
+    const weekDays = getWeekDays(refDate || new Date());
+    const startDateVi = weekDays[0].dateVi;
+    const endDateVi = weekDays[5].dateVi;
+
+    const weekTitle = refDate
+      ? `tuần từ ${startDateVi} đến ${endDateVi}`
+      : `tuần này (${startDateVi} đến ${endDateVi})`;
+
+    let reportText = `📅 **Báo cáo điểm danh ${weekTitle} (Thứ Hai đến Thứ Bảy):**\n\n`;
+
+    weekDays.forEach((wd) => {
+      const recs = history.filter((r) => isRecordForTargetDate(r, wd));
+
+      if (recs.length === 0) {
+        reportText += `• **${wd.dayName} (${wd.dateVi}):** Chưa có dữ liệu điểm danh\n`;
+      } else {
+        const details = recs.map((r) => `${r.className || r.Lop || 'Lớp'}: Vắng (${r.absentNames || r.danhsachvang || 'Không có'})`).join('; ');
+        reportText += `• **${wd.dayName} (${wd.dateVi}):** ${details}\n`;
+      }
+    });
+
+    return reportText;
+  }
+
+  // 3. Hỏi về tổng sĩ số / danh sách
+  if (q.includes('sĩ số') || q.includes('bao nhiêu học sinh') || q.includes('tổng số bé') || q.includes('danh sách')) {
+    const total = students.length;
+    const lopDuoi = students.filter(s => (s.className || s.Lop || '').toLowerCase().includes('dưới')).length;
+    const lopTren = students.filter(s => (s.className || s.Lop || '').toLowerCase().includes('trên')).length;
+
+    return `📊 **Thống kê sĩ số toàn trường:**
+• **Tổng số học sinh:** ${total} bé
+• **Lớp dưới:** ${lopDuoi} bé
+• **Lớp trên lầu:** ${lopTren} bé
+
+*Nhấn tab **Danh Sách Học Sinh** hoặc nhập tên bé để tra cứu chi tiết.*`;
   }
 
   // Standard welcome / help response
