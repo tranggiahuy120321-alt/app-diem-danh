@@ -1,7 +1,17 @@
 // Local smart rule-based analyzer for client-side fallback when API server is unreachable or returns 404
 
-export function generateLocalSmartResponse(promptStr: string, students: any[], history: any[]): string {
+export function generateLocalSmartResponse(promptStr: string, students: any[] = [], history: any[] = []): string {
   const q = promptStr.toLowerCase().trim();
+
+  const removeAccents = (str: string) => {
+    return str
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D');
+  };
+
+  const normQ = removeAccents(q);
 
   // Helper to extract date from user prompt string (e.g. 27/07/2026, 27/07, 27-07-2026, 04/08/2026)
   const extractDateFromPrompt = (str: string) => {
@@ -162,6 +172,22 @@ export function generateLocalSmartResponse(promptStr: string, students: any[], h
   };
 
   const findRecordForDay = (targetDay: { dateObj: Date; dateVi: string; dateViShort: string; dateISO: string }, className?: string) => {
+    // 1. Try class-specific match first
+    if (className) {
+      const match = history.find((rec) =>
+        isRecordForTargetDate(rec, {
+          year: targetDay.dateObj.getFullYear(),
+          month: targetDay.dateObj.getMonth() + 1,
+          day: targetDay.dateObj.getDate(),
+          dateVi: targetDay.dateVi,
+          dateViShort: targetDay.dateViShort,
+          dateISO: targetDay.dateISO,
+        }, className)
+      );
+      if (match) return match;
+    }
+
+    // 2. Fallback to any class record for that day
     return history.find((rec) => {
       return isRecordForTargetDate(rec, {
         year: targetDay.dateObj.getFullYear(),
@@ -170,7 +196,7 @@ export function generateLocalSmartResponse(promptStr: string, students: any[], h
         dateVi: targetDay.dateVi,
         dateViShort: targetDay.dateViShort,
         dateISO: targetDay.dateISO,
-      }, className);
+      });
     });
   };
 
@@ -199,22 +225,75 @@ export function generateLocalSmartResponse(promptStr: string, students: any[], h
     }
   }
 
-  // 1. Tìm thông tin học sinh & báo cáo điểm danh theo tuần của học sinh
-  const foundStudents = students.filter(s => {
-    const name = (s.fullName || s.hoTen || '').toLowerCase();
-    const parent = (s.parentName || s.tenPhuHuynh || '').toLowerCase();
-    const id = (s.id || '').toLowerCase();
-    return name.includes(q) || parent.includes(q) || (q.length >= 2 && id.includes(q));
-  });
+  // 1. Smart Student Extraction & Weekly Attendance Matching
+  // Scoring students based on prompt text matching
+  let bestStudent: any = null;
+  let maxScore = 0;
 
-  if (foundStudents.length > 0 && (q.includes('bé') || q.includes('em') || q.includes('cháu') || q.includes('học sinh') || q.includes('phụ huynh') || q.includes('sđt') || q.includes('đi học') || q.includes('vắng') || q.includes('nghỉ') || q.includes('tuần') || foundStudents.length === 1)) {
-    const target = foundStudents[0];
-    const name = target.fullName || target.hoTen || 'Học sinh';
-    const cName = target.className || target.Lop || 'Chưa rõ lớp';
-    const parent = target.parentName || target.tenPhuHuynh || 'Chưa cập nhật';
-    const phone = target.phone || target.soDienThoai || 'Chưa cập nhật';
+  for (const s of students) {
+    const fullName = String(s.fullName || s.hoTen || s.Name || s.name || '').trim();
+    if (!fullName) continue;
 
-    // Tính toán điểm danh theo tuần (Thứ Hai đến Thứ Bảy - Mẫu số luôn = 6)
+    const normFullName = removeAccents(fullName.toLowerCase());
+    const parent = String(s.parentName || s.tenPhuHuynh || '').trim();
+    const normParent = removeAccents(parent.toLowerCase());
+    const id = String(s.id || '').trim().toLowerCase();
+
+    let score = 0;
+
+    // Check full name exact/substring match
+    if (normFullName.length > 0 && normQ.includes(normFullName)) {
+      score = 100;
+    } else if (normFullName.length > 0 && normFullName.includes(normQ) && normQ.length >= 3) {
+      score = 70;
+    } else {
+      // Check last 2 words of full name (e.g. "Gia Lâm" from "Trần Gia Lâm")
+      const words = fullName.split(/\s+/);
+      if (words.length >= 2) {
+        const shortName = words.slice(-2).join(' ');
+        const normShort = removeAccents(shortName.toLowerCase());
+        if (normQ.includes(normShort)) {
+          score = 90;
+        }
+      }
+      // Check last word if length >= 2 (e.g. "Lâm" or "Nhật")
+      if (score === 0 && words.length > 0) {
+        const lastWord = words[words.length - 1];
+        const normLast = removeAccents(lastWord.toLowerCase());
+        if (normLast.length >= 2) {
+          const regex = new RegExp(`\\b${normLast}\\b`, 'i');
+          if (regex.test(normQ)) {
+            score = 50;
+          }
+        }
+      }
+    }
+
+    if (score < 50 && normParent.length >= 3 && normQ.includes(normParent)) {
+      score = 40;
+    }
+
+    if (score < 50 && id.length >= 2 && normQ.includes(id)) {
+      score = 40;
+    }
+
+    if (score > maxScore) {
+      maxScore = score;
+      bestStudent = s;
+    }
+  }
+
+  // If a specific student was matched with high confidence
+  if (bestStudent && maxScore >= 40) {
+    const name = bestStudent.fullName || bestStudent.hoTen || bestStudent.Name || 'Học sinh';
+    const cName = bestStudent.className || bestStudent.Lop || bestStudent.lop || 'Chưa rõ lớp';
+    const parent = bestStudent.parentName || bestStudent.tenPhuHuynh || 'Chưa cập nhật';
+    const phone = bestStudent.phone || bestStudent.soDienThoai || 'Chưa cập nhật';
+
+    const words = name.trim().split(/\s+/);
+    const shortName = words.length >= 2 ? words.slice(-2).join(' ') : name;
+
+    // Calculate weekly attendance (Monday to Saturday - 6 days)
     const weekDays = getWeekDays(new Date());
     let weekReportText = '';
     let absentCount = 0;
@@ -227,8 +306,17 @@ export function generateLocalSmartResponse(promptStr: string, students: any[], h
         noDataCount++;
         weekReportText += `• **${wd.dayName} (${wd.dateVi}):** Chưa có dữ liệu điểm danh\n`;
       } else {
-        const absentNames = String(rec.absentNames || rec.danhsachvang || '').toLowerCase();
-        if (absentNames.includes(name.toLowerCase())) {
+        const absentNames = String(rec.absentNames || rec.danhsachvang || rec.DanhSachVang || '');
+        const normAbsent = removeAccents(absentNames.toLowerCase());
+        const normFull = removeAccents(name.toLowerCase());
+        const normShort = removeAccents(shortName.toLowerCase());
+
+        // Check if student is listed as absent
+        const isAbsent = normAbsent.includes(normFull) || normAbsent.includes(normShort) || (
+          words.length > 0 && normAbsent.includes(removeAccents(words[words.length - 1].toLowerCase()))
+        );
+
+        if (isAbsent) {
           absentCount++;
           weekReportText += `• **${wd.dayName} (${wd.dateVi}):** ❌ Vắng mặt\n`;
         } else {
@@ -248,7 +336,7 @@ ${weekReportText}
 📊 **Tóm tắt tuần:** Số buổi đi học: **${presentCount}/6 buổi** (${presentCount} ngày có mặt, ${absentCount} ngày vắng mặt, ${noDataCount} ngày chưa có dữ liệu điểm danh).`;
   }
 
-  // 2. Hỏi theo tuần (vd: "điểm danh tuần này", "báo cáo tuần")
+  // 2. Hỏi theo tuần chung (ví dụ: "điểm danh tuần này", "báo cáo tuần")
   if (q.includes('tuần') || q.includes('tất cả các ngày')) {
     const weekDays = getWeekDays(new Date());
     let reportText = `📅 **Báo cáo điểm danh tuần này (Thứ Hai đến Thứ Bảy):**\n\n`;
@@ -309,8 +397,8 @@ ${weekReportText}
   // Standard welcome / help response
   return `🤖 **Trợ Lý Hướng Dương xin chào!**
 Tôi có thể hỗ trợ bạn:
-1. **Tra cứu điểm danh theo tuần (Thứ Hai - Thứ Bảy):** Nhập tên bé (Ví dụ: *"Tra cứu bé Minh Nhật"*) hoặc *"Điểm danh tuần này"*.
-2. **Xử lý chính xác dữ liệu:** Liệt kê đầy đủ 6 ngày từ Thứ Hai đến Thứ Bảy, ngày nào không có bản ghi sẽ hiển thị *"Chưa có dữ liệu điểm danh"*.
+1. **Tra cứu điểm danh theo tuần (Thứ Hai - Thứ Bảy):** Nhập tên bé (Ví dụ: *"Bé Gia Lâm tuần này có đi học không?"*) hoặc *"Điểm danh tuần này"*.
+2. **Xử lý chính xác dữ liệu:** Liệt kê đầy đủ 6 ngày từ Thứ Hai đến Thứ Bảy, báo cáo chính xác số buổi đi học (ví dụ X/6 buổi) và lọc đúng thông tin bé.
 3. **Tra cứu sĩ số & phụ huynh:** Nhập *"Sĩ số các lớp"* hoặc *"SĐT phụ huynh bé An Vy"*.
 
 Hãy gửi câu hỏi của bạn bên dưới!`;
