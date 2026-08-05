@@ -505,14 +505,17 @@ export async function deleteAttendanceApi(target: any): Promise<{ success: boole
  * Lấy URL tuyệt đối chuẩn cho endpoint AI Assistant trên cả desktop và thiết bị di động
  */
 export function getAIAssistantApiUrl(): string {
-  if (typeof window !== 'undefined' && window.location?.origin && window.location.origin.startsWith('http')) {
-    return `${window.location.origin.replace(/\/$/, '')}/api/ai-assistant`;
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    const origin = window.location.origin;
+    if (origin.startsWith('http')) {
+      return `${origin.replace(/\/$/, '')}/api/ai-assistant`;
+    }
   }
   return '/api/ai-assistant';
 }
 
 /**
- * Gửi yêu cầu phân tích AI tới backend server với AbortController timeout 5 giây và xử lý lỗi đồng bộ
+ * Gửi yêu cầu phân tích AI tới backend server với AbortController timeout 12 giây và xử lý lỗi đồng bộ
  */
 export async function sendAIAssistantApi(payload: {
   prompt: string;
@@ -522,7 +525,7 @@ export async function sendAIAssistantApi(payload: {
 }): Promise<{ success: boolean; reply: string }> {
   const apiUrl = getAIAssistantApiUrl();
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
 
   try {
     const res = await fetch(apiUrl, {
@@ -547,7 +550,7 @@ export async function sendAIAssistantApi(payload: {
   } catch (err: any) {
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
-      console.warn('AI Assistant API quá thời gian chờ (timeout 10s), chuyển sang bộ phân tích cục bộ.');
+      console.warn('AI Assistant API quá thời gian chờ (timeout 12s), chuyển sang bộ phân tích cục bộ.');
     } else {
       console.warn('Không thể kết nối AI Assistant API server:', err);
     }

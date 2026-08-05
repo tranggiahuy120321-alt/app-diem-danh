@@ -129,7 +129,7 @@ QUY TẮC TRÌNH BÀY:
           });
 
           const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Gemini API timeout (9s)')), 9000)
+            setTimeout(() => reject(new Error('Gemini API timeout (10s)')), 10000)
           );
 
           const response: any = await Promise.race([geminiCall, timeoutPromise]);
