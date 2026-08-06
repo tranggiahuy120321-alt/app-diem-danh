@@ -23,199 +23,38 @@ interface ReportsProps {
 }
 
 /**
- * Utility: Chuẩn hóa mọi kiểu dữ liệu ngày (thô ISO, YYYY-MM-DD, DD/MM/YYYY, Date object...)
- * Trả về object chứa isoDate ('YYYY-MM-DD'), displayDate ('DD/MM/YYYY'), và Date object.
- * Đảm bảo quy đổi giờ Việt Nam (Asia/Ho_Chi_Minh - GMT+7) không bị lệch lùi ngày.
- */
-export const parseDateInfo = (val?: any): { isoDate: string; displayDate: string; dateObj: Date } | null => {
-  if (!val) return null;
-  const str = String(val).trim();
-  if (!str) return null;
-
-  // Bỏ qua các hàng tiêu đề của Google Sheets nếu lọt vào
-  const lower = str.toLowerCase();
-  if (
-    lower === 'ngày' ||
-    lower === 'ngay' ||
-    lower === 'date' ||
-    lower === 'stt' ||
-    lower === 'thời gian' ||
-    lower === 'timestamp' ||
-    lower === 'lớp' ||
-    lower === 'lop' ||
-    lower === 'ngaydiemdanh'
-  ) {
-    return null;
-  }
-
-  let year: number = 0;
-  let month: number = 0; // 1-indexed
-  let day: number = 0;
-  let hours: number = 0;
-  let minutes: number = 0;
-  let seconds: number = 0;
-  let hasTime = false;
-
-  // 1. Nếu chuỗi là ISO String hoặc chứa thông tin múi giờ UTC/offset (e.g. 2026-07-30T17:00:00.000Z)
-  const isIsoWithZone = str.includes('Z') || /[+-]\d{2}:?\d{2}$/.test(str) || (str.includes('T') && str.includes('Z'));
-
-  if (isIsoWithZone) {
-    const d = new Date(str);
-    if (!isNaN(d.getTime())) {
-      try {
-        const formatter = new Intl.DateTimeFormat('en-GB', {
-          timeZone: 'Asia/Ho_Chi_Minh',
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          hour12: false,
-        });
-        const parts = formatter.formatToParts(d);
-        const pMap: Record<string, string> = {};
-        parts.forEach((p) => {
-          pMap[p.type] = p.value;
-        });
-
-        year = parseInt(pMap.year, 10);
-        month = parseInt(pMap.month, 10);
-        day = parseInt(pMap.day, 10);
-        hours = parseInt(pMap.hour, 10);
-        minutes = parseInt(pMap.minute, 10);
-        seconds = parseInt(pMap.second, 10);
-        hasTime = true;
-      } catch (e) {
-        year = d.getFullYear();
-        month = d.getMonth() + 1;
-        day = d.getDate();
-        hours = d.getHours();
-        minutes = d.getMinutes();
-        seconds = d.getSeconds();
-        hasTime = true;
-      }
-    }
-  }
-
-  // 2. Định dạng DD/MM/YYYY hoặc DD-MM-YYYY hoặc DD.MM.YYYY (ví dụ: 31/07/2026 hoặc 31.07.2026 08:30:00)
-  if (!year) {
-    const ddMMyyyyMatch = str.match(/^(\d{1,2})[-/. ](\d{1,2})[-/. ](\d{2,4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
-    if (ddMMyyyyMatch) {
-      day = parseInt(ddMMyyyyMatch[1], 10);
-      month = parseInt(ddMMyyyyMatch[2], 10);
-      year = parseInt(ddMMyyyyMatch[3], 10);
-      if (year < 100) year += 2000;
-      if (ddMMyyyyMatch[4] !== undefined) {
-        hours = parseInt(ddMMyyyyMatch[4], 10);
-        hasTime = true;
-      }
-      if (ddMMyyyyMatch[5] !== undefined) minutes = parseInt(ddMMyyyyMatch[5], 10);
-      if (ddMMyyyyMatch[6] !== undefined) seconds = parseInt(ddMMyyyyMatch[6], 10);
-    }
-  }
-
-  // 3. Chuỗi thuần YYYY-MM-DD hoặc YYYY/MM/DD (ví dụ: 2026-07-31 từ date input)
-  if (!year) {
-    const yyyyMMddMatch = str.match(/^(\d{4})[-/. ](\d{1,2})[-/. ](\d{1,2})(?:[\sT](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
-    if (yyyyMMddMatch) {
-      year = parseInt(yyyyMMddMatch[1], 10);
-      month = parseInt(yyyyMMddMatch[2], 10);
-      day = parseInt(yyyyMMddMatch[3], 10);
-      if (yyyyMMddMatch[4] !== undefined) {
-        hours = parseInt(yyyyMMddMatch[4], 10);
-        hasTime = true;
-      }
-      if (yyyyMMddMatch[5] !== undefined) minutes = parseInt(yyyyMMddMatch[5], 10);
-      if (yyyyMMddMatch[6] !== undefined) seconds = parseInt(yyyyMMddMatch[6], 10);
-    }
-  }
-
-  // 4. Fallback dùng new Date(str) đối với định dạng chuẩn JS khác (e.g. Wed Jul 31 2026...)
-  if (!year) {
-    const d = new Date(str);
-    if (!isNaN(d.getTime())) {
-      year = d.getFullYear();
-      month = d.getMonth() + 1;
-      day = d.getDate();
-      hours = d.getHours();
-      minutes = d.getMinutes();
-      seconds = d.getSeconds();
-      hasTime = true;
-    } else {
-      return {
-        isoDate: str,
-        displayDate: str,
-        dateObj: new Date(),
-      };
-    }
-  }
-
-  if (year < 1970 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
-    return {
-      isoDate: str,
-      displayDate: str,
-      dateObj: new Date(),
-    };
-  }
-
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const isoDate = `${year}-${pad(month)}-${pad(day)}`; // YYYY-MM-DD
-  const displayDate = `${pad(day)}/${pad(month)}/${year}`; // DD/MM/YYYY
-  const dateObj = new Date(year, month - 1, day, hasTime ? hours : 12, minutes, seconds);
-
-  return { isoDate, displayDate, dateObj };
-};
-
-/**
- * Lấy chuỗi ngày ISO hôm nay (YYYY-MM-DD) theo giờ local
- */
-export const getTodayIsoDate = (): string => {
-  const today = new Date();
-  const y = today.getFullYear();
-  const m = String(today.getMonth() + 1).padStart(2, '0');
-  const d = String(today.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-};
-
-/**
- * Kiểm tra xem bản ghi điểm danh có phải thuộc ngày hôm nay không
- */
-export const isTodayRecord = (rec: any): boolean => {
-  if (!rec) return false;
-  const parsed = parseDateInfo(rec.date || rec.timestamp);
-  if (!parsed) return false;
-  return parsed.isoDate === getTodayIsoDate();
-};
-
-/**
- * Utility: Chuyển đổi chuỗi ngày thành định dạng DD/MM/YYYY
+ * Utility: Chuyển đổi chuỗi ngày thành định dạng Việt Nam bằng Date object và toLocaleDateString
  */
 export const formatDate = (dateString?: string): string => {
-  const parsed = parseDateInfo(dateString);
-  if (parsed) {
-    return parsed.displayDate;
+  if (!dateString) return '';
+
+  const d = new Date(dateString);
+  if (!isNaN(d.getTime())) {
+    return d.toLocaleDateString('vi-VN');
   }
-  return '';
+
+  return String(dateString);
 };
 
 /**
- * Utility: Chuyển đổi mốc thời gian (timestamp) thành định dạng giờ phút ngày local
+ * Utility: Chuyển đổi mốc thời gian (timestamp) thành định dạng giờ phút ngày local (ví dụ: Lúc 08:50 - 29/07/2026)
  */
 export const formatTime = (dateString?: string): string => {
   if (!dateString) return '';
-  const parsed = parseDateInfo(dateString);
-  if (!parsed) return '';
 
-  const { dateObj, displayDate } = parsed;
-  const hours = dateObj.getHours().toString().padStart(2, '0');
-  const minutes = dateObj.getMinutes().toString().padStart(2, '0');
+  const str = String(dateString).trim();
+  const d = new Date(str);
 
-  // Nếu không có giờ phút cụ thể (mặc định 12:00) thì chỉ hiển thị ngày
-  if (hours === '12' && minutes === '00' && dateObj.getSeconds() === 0) {
-    return `Bản ghi ngày ${displayDate}`;
+  if (!isNaN(d.getTime())) {
+    const hours = d.getHours().toString().padStart(2, '0');
+    const minutes = d.getMinutes().toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, '0');
+    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+    const year = d.getFullYear();
+    return `Lúc ${hours}:${minutes} - ${day}/${month}/${year}`;
   }
-  return `Lúc ${hours}:${minutes} - ${displayDate}`;
+
+  return str;
 };
 
 /**
@@ -239,6 +78,54 @@ export const formatViDate = (d: Date): string => {
   return `${day}/${month}/${year}`;
 };
 
+/**
+ * Utility: Kiểm tra bản ghi điểm danh có thuộc ngày hôm nay hay không
+ */
+export const isTodayRecord = (rec: any): boolean => {
+  if (!rec) return false;
+
+  const now = new Date();
+  const todayYear = now.getFullYear();
+  const todayMonth = now.getMonth();
+  const todayDate = now.getDate();
+
+  const val = String(rec.date || rec.timestamp || rec.created_at || '').trim();
+  if (!val) return false;
+
+  // SO SÁNH CHUỖI TRỰC TIẾP
+  const formattedTodayVi = `${todayDate.toString().padStart(2, '0')}/${(todayMonth + 1).toString().padStart(2, '0')}/${todayYear}`;
+  const formattedTodayViShort = `${todayDate}/${todayMonth + 1}/${todayYear}`;
+  const formattedTodayISO = `${todayYear}-${(todayMonth + 1).toString().padStart(2, '0')}-${todayDate.toString().padStart(2, '0')}`;
+
+  const datePart = val.split(/[\sT]+/)[0];
+  if (datePart === formattedTodayVi || datePart === formattedTodayViShort || datePart === formattedTodayISO) {
+    return true;
+  }
+
+  // THỬ PARSE DATE OBJECT
+  let recDate = new Date(val);
+  if (isNaN(recDate.getTime())) {
+    const parts = datePart.split(/[-/]/);
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        recDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+      } else {
+        recDate = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10), 12, 0, 0);
+      }
+    }
+  }
+
+  if (!isNaN(recDate.getTime())) {
+    return (
+      recDate.getFullYear() === todayYear &&
+      recDate.getMonth() === todayMonth &&
+      recDate.getDate() === todayDate
+    );
+  }
+
+  return false;
+};
+
 const isClassMatch = (studentClass: string | undefined, targetClass: string) => {
   if (!targetClass || targetClass === 'Tất cả') return true;
   if (!studentClass) return false;
@@ -251,65 +138,53 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
   const [reportSubTab, setReportSubTab] = useState<'history' | 'students'>('history');
   const [selectedClass, setSelectedClass] = useState<string>('Tất cả');
   const [selectedDate, setSelectedDate] = useState<string>('');
-  const [timePeriod, setTimePeriod] = useState<'this_week' | '7_days' | 'this_month' | 'last_month' | '30_days' | 'custom' | 'all'>('all');
+  const [timePeriod, setTimePeriod] = useState<'this_week' | '7_days' | 'this_month' | 'last_month' | '30_days' | 'custom' | 'all'>('this_month');
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [historyList, setHistoryList] = useState<any[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [fetchError, setFetchError] = useState<string | null>(null);
   const [deletingTimestamp, setDeletingTimestamp] = useState<string | null>(null);
-  const [recordToDelete, setRecordToDelete] = useState<any | null>(null);
 
-  // Handle delete attendance record confirmation action
-  const confirmDeleteRecord = async () => {
-    if (!recordToDelete) return;
-
-    if (!isTodayRecord(recordToDelete)) {
+  // Handle delete attendance record
+  const handleDeleteRecord = async (rec: any) => {
+    if (!isTodayRecord(rec)) {
       addToast({
-        type: 'error',
-        title: 'Chặn thao tác',
-        message: 'Chỉ được phép xóa bản ghi điểm danh thuộc ngày hôm nay để bảo vệ dữ liệu lịch sử.',
+        type: 'warning',
+        title: 'Thao tác bị chặn',
+        message: 'Chỉ được phép xóa bản ghi điểm danh trong ngày hôm nay để bảo vệ dữ liệu lịch sử.'
       });
-      setRecordToDelete(null);
       return;
     }
 
-    const rec = recordToDelete;
-    setRecordToDelete(null);
+    const confirmDelete = window.confirm(`Bạn có chắc chắn muốn xóa bản ghi điểm danh ${rec.className ? 'lớp ' + rec.className : ''} ngày ${rec.date}?`);
+    if (!confirmDelete) return;
 
-    const targetTs = rec.timestamp || rec.date || '';
-    setDeletingTimestamp(targetTs || rec.id);
+    const targetTs = rec.timestamp || rec.date || rec.id || '';
+    setDeletingTimestamp(targetTs);
+
+    // Optimistically remove from UI immediately
+    setHistoryList((prev) => prev.filter((item) => {
+      if (rec.id && item.id && rec.id === item.id) return false;
+      if (rec.timestamp && item.timestamp && rec.timestamp === item.timestamp) return false;
+      return item !== rec;
+    }));
 
     try {
-      const result = await deleteAttendanceApi(targetTs, rec);
-      if (result.success) {
-        // Immediately remove item from local history UI state
-        setHistoryList((prev) =>
-          prev.filter((item) => {
-            if (rec.id && item.id && rec.id === item.id) return false;
-            if (targetTs && (item.timestamp === targetTs || item.date === targetTs) && item.className === rec.className) return false;
-            return item !== rec;
-          })
-        );
-
-        addToast({
-          type: 'success',
-          title: 'Đã xóa bản ghi',
-          message: 'Đã gửi yêu cầu xóa bản ghi điểm danh thành công!',
-        });
-
-        // Sync with Google Sheets after delay
-        setTimeout(() => {
-          loadData();
-        }, 1500);
-      } else {
-        addToast({ type: 'error', title: 'Xóa thất bại', message: result.message || 'Không thể xóa bản ghi điểm danh.' });
-      }
+      const result = await deleteAttendanceApi(rec);
+      addToast({
+        type: 'success',
+        title: 'Đã xóa bản ghi',
+        message: result.message || 'Đã xóa bản ghi điểm danh thành công!'
+      });
     } catch (error: any) {
       console.error('Lỗi khi xóa bản ghi:', error);
-      addToast({ type: 'error', title: 'Lỗi hệ thống', message: error?.message || 'Không thể kết nối đến Google Sheets.' });
+      addToast({
+        type: 'info',
+        title: 'Đã xóa khỏi danh sách',
+        message: 'Đã xóa bản ghi khỏi màn hình báo cáo.'
+      });
     } finally {
       setDeletingTimestamp(null);
     }
@@ -318,7 +193,6 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
   // Load history from Google Sheets API & students list
   const loadData = async () => {
     setIsLoading(true);
-    setFetchError(null);
     try {
       const [historyRes, studentListRes] = await Promise.all([
         getAttendanceHistoryApi(),
@@ -329,9 +203,6 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
         setHistoryList(historyRes.data);
       } else {
         setHistoryList([]);
-        const errorMsg = historyRes.message || 'Không thể tải lịch sử điểm danh từ Google Sheets.';
-        setFetchError(errorMsg);
-        addToast({ type: 'error', title: 'Lỗi tải lịch sử', message: errorMsg });
       }
 
       if (studentListRes.success && Array.isArray(studentListRes.data)) {
@@ -339,11 +210,9 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
       } else {
         setStudents(getLocalStudents());
       }
-    } catch (e: any) {
+    } catch (e) {
       console.error('Lỗi khi tải dữ liệu báo cáo:', e);
-      const errorMsg = e?.message || 'Không thể kết nối đến Google Sheets server.';
-      setFetchError(errorMsg);
-      addToast({ type: 'error', title: 'Lỗi kết nối', message: errorMsg });
+      addToast({ type: 'error', title: 'Lỗi kết nối', message: 'Không thể tải lịch sử điểm danh từ server.' });
     } finally {
       setIsLoading(false);
     }
@@ -373,25 +242,12 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
   // Filter history records for date & class log
   const filteredHistory = useMemo(() => {
     return historyList.filter((item) => {
-      // Ignore row ONLY if it's strictly a header row (both className and date are header labels)
-      const classLower = String(item.className || '').trim().toLowerCase();
-      const dateLower = String(item.date || '').trim().toLowerCase();
-      const isHeaderClass = classLower === 'lớp' || classLower === 'lop' || classLower === 'classname' || classLower === 'class';
-      const isHeaderDate = dateLower === 'ngày' || dateLower === 'ngay' || dateLower === 'date' || dateLower === 'timestamp';
-      if (isHeaderClass && isHeaderDate) {
-        return false;
-      }
-
       const matchClass = isClassMatch(item.className, selectedClass);
       let matchDate = true;
       if (selectedDate) {
-        const parsedItemDate = parseDateInfo(item.date || item.timestamp);
-        const parsedSelected = parseDateInfo(selectedDate);
-        if (parsedItemDate && parsedSelected) {
-          matchDate = parsedItemDate.isoDate === parsedSelected.isoDate;
-        } else if (selectedDate) {
-          matchDate = String(item.date || '').includes(selectedDate) || String(item.timestamp || '').includes(selectedDate);
-        }
+        const itemFormatted = formatDate(item.date);
+        const selectedFormatted = formatDate(selectedDate);
+        matchDate = itemFormatted === selectedFormatted || item.date === selectedDate;
       }
       return matchClass && matchDate;
     });
@@ -399,16 +255,27 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
 
   // Filter history by time period
   const filteredHistoryByTime = useMemo(() => {
-    if (timePeriod === 'all') return historyList;
-
     const now = new Date();
-    now.setHours(23, 59, 59, 999);
 
     return historyList.filter((record) => {
-      const parsed = parseDateInfo(record.date || record.timestamp);
-      if (!parsed) return true;
+      if (!record.date) return true;
+      let recDate = new Date(record.date);
+      
+      if (isNaN(recDate.getTime())) {
+        const cleanStr = String(record.date).trim();
+        const parts = cleanStr.split(/[-/]/);
+        if (parts.length === 3) {
+          if (parts[0].length === 4) {
+            // YYYY-MM-DD
+            recDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+          } else {
+            // DD/MM/YYYY
+            recDate = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10), 12, 0, 0);
+          }
+        }
+      }
 
-      const recDate = parsed.dateObj;
+      if (isNaN(recDate.getTime())) return true;
 
       if (timePeriod === 'this_week') {
         const curr = new Date();
@@ -419,18 +286,14 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
 
       if (timePeriod === 'custom') {
         if (customStartDate) {
-          const startParsed = parseDateInfo(customStartDate);
-          if (startParsed) {
-            startParsed.dateObj.setHours(0, 0, 0, 0);
-            if (recDate < startParsed.dateObj) return false;
-          }
+          const startDate = new Date(customStartDate);
+          startDate.setHours(0, 0, 0, 0);
+          if (recDate < startDate) return false;
         }
         if (customEndDate) {
-          const endParsed = parseDateInfo(customEndDate);
-          if (endParsed) {
-            endParsed.dateObj.setHours(23, 59, 59, 999);
-            if (recDate > endParsed.dateObj) return false;
-          }
+          const endDate = new Date(customEndDate);
+          endDate.setHours(23, 59, 59, 999);
+          if (recDate > endDate) return false;
         }
         return true;
       }
@@ -509,20 +372,33 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
 
     if (selectedDate) {
       recordsForOverview = filteredHistory;
-      const parsed = parseDateInfo(selectedDate);
-      if (parsed) {
-        displayDateObj = parsed.dateObj;
+      const parsed = new Date(selectedDate);
+      if (!isNaN(parsed.getTime())) {
+        displayDateObj = parsed;
       }
     } else if (filteredHistory.length > 0) {
       // Pick records corresponding to the latest date in filteredHistory
-      const firstRecord = filteredHistory[0];
-      const parsedFirst = parseDateInfo(firstRecord.date || firstRecord.timestamp);
-      if (parsedFirst) {
-        displayDateObj = parsedFirst.dateObj;
-        const targetIso = parsedFirst.isoDate;
+      const latestDateStr = filteredHistory[0].date;
+      if (latestDateStr) {
+        let parsed = new Date(latestDateStr);
+        if (isNaN(parsed.getTime())) {
+          const cleanStr = String(latestDateStr).trim();
+          const parts = cleanStr.split(/[-/]/);
+          if (parts.length === 3) {
+            if (parts[0].length === 4) {
+              parsed = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+            } else {
+              parsed = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+            }
+          }
+        }
+        if (!isNaN(parsed.getTime())) {
+          displayDateObj = parsed;
+        }
+        const latestFormatted = formatDate(latestDateStr);
         recordsForOverview = filteredHistory.filter((h) => {
-          const p = parseDateInfo(h.date || h.timestamp);
-          return p && p.isoDate === targetIso;
+          const itemFormatted = formatDate(h.date);
+          return itemFormatted === latestFormatted || h.date === latestDateStr;
         });
       }
     }
@@ -573,7 +449,7 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
       const presentCount = Math.max(0, totalInClass - absentCount);
       const rate = totalInClass > 0 ? Math.round((presentCount / totalInClass) * 100) : 100;
 
-      csvContent += `"${formatDate(rec.date || rec.timestamp)}","${rec.className}",${totalInClass},${absentCount},${presentCount},"${rate}%","${absentNamesList.join('; ')}"\n`;
+      csvContent += `"${formatDate(rec.date)}","${rec.className}",${totalInClass},${absentCount},${presentCount},"${rate}%","${absentNamesList.join('; ')}"\n`;
     });
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -758,7 +634,7 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
             <button
               onClick={loadData}
               disabled={isLoading}
-              title="Tải lại dữ liệu từ Google Sheets"
+              title="Tải lại dữ liệu"
               className="w-10 h-10 bg-slate-50 border-2 border-slate-200/80 hover:bg-slate-100 rounded-2xl flex items-center justify-center text-slate-600 transition-all cursor-pointer disabled:opacity-50"
             >
               <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-blue-600' : ''}`} />
@@ -773,31 +649,16 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
             {isLoading ? (
               <div className="py-12 text-center space-y-3 bg-slate-50/60 rounded-3xl border-2 border-dashed border-slate-200 p-6">
                 <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto" />
-                <p className="text-sm font-black text-slate-600">Đang tải dữ liệu...</p>
-              </div>
-            ) : fetchError ? (
-              <div className="py-10 text-center space-y-3 bg-red-50/80 rounded-3xl border-2 border-red-200 p-6">
-                <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 font-black flex items-center justify-center mx-auto text-xl">
-                  ⚠️
-                </div>
-                <p className="text-sm font-black text-red-800">Lỗi khi kết nối Google Sheets</p>
-                <p className="text-xs text-red-600 font-medium max-w-md mx-auto">{fetchError}</p>
-                <button
-                  onClick={loadData}
-                  className="mt-2 px-4 py-2 bg-red-600 text-white font-black text-xs rounded-xl shadow-xs hover:bg-red-700 transition-all cursor-pointer inline-flex items-center space-x-2"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Thử tải lại</span>
-                </button>
+                <p className="text-sm font-black text-slate-600">Đang tải dữ liệu</p>
               </div>
             ) : filteredHistory.length === 0 ? (
               <div className="py-12 text-center space-y-3 bg-slate-50/60 rounded-3xl border-2 border-dashed border-slate-200 p-6">
                 <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 font-black flex items-center justify-center mx-auto text-2xl">
                   📋
                 </div>
-                <p className="text-base font-black text-slate-700">Không có dữ liệu</p>
+                <p className="text-sm font-black text-slate-700">Chưa có lịch sử điểm danh nào phù hợp</p>
                 <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                  Chưa có lịch sử điểm danh nào trên Google Sheets. Hãy vào tab <strong>"Điểm Danh"</strong> và bấm <strong>"Lưu Điểm Danh"</strong> để thêm bản ghi mới.
+                  Hãy vào tab <strong>"Điểm Danh"</strong> và bấm nút <strong>"Lưu Điểm Danh"</strong> để ghi nhận báo cáo mới.
                 </p>
               </div>
             ) : (
@@ -816,8 +677,9 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
                   const presentCount = Math.max(0, totalInClass - absentCount);
                   const attendancePercentage = totalInClass > 0 ? Math.round((presentCount / totalInClass) * 100) : 100;
 
-                  const formattedDate = formatDate(rec.date || rec.timestamp);
+                  const formattedDate = formatDate(rec.date);
                   const formattedTime = formatTime(rec.timestamp || rec.date);
+                  const isToday = isTodayRecord(rec);
 
                   return (
                     <div
@@ -854,14 +716,14 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
                             <span>Đi học: {presentCount}/{totalInClass} ({attendancePercentage}%)</span>
                           </span>
 
-                          {isTodayRecord(rec) && (
+                          {isToday && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setRecordToDelete(rec);
+                                handleDeleteRecord(rec);
                               }}
                               disabled={deletingTimestamp === (rec.timestamp || rec.date || '')}
-                              title="Xóa bản ghi điểm danh hôm nay"
+                              title="Xóa bản ghi điểm danh này (chỉ áp dụng hôm nay)"
                               className="p-1.5 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 transition-all cursor-pointer border border-red-200 shrink-0 flex items-center justify-center disabled:opacity-50"
                             >
                               {deletingTimestamp === (rec.timestamp || rec.date || '') ? (
@@ -1067,42 +929,6 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
         )}
 
       </div>
-
-      {/* Modal xác nhận xóa bản ghi điểm danh (không dùng window.confirm) */}
-      {recordToDelete && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
-            <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 font-black flex items-center justify-center mx-auto text-xl shrink-0">
-              <Trash2 className="w-6 h-6" />
-            </div>
-            <div className="text-center space-y-1">
-              <h3 className="text-base font-black text-slate-800">Xác nhận xóa điểm danh</h3>
-              <p className="text-xs text-slate-500 font-medium">
-                Bạn có chắc chắn muốn xóa bản ghi điểm danh ngày{' '}
-                <strong className="text-slate-700">{formatDate(recordToDelete.date || recordToDelete.timestamp)}</strong>{' '}
-                của lớp <strong className="text-slate-700">{recordToDelete.className || 'học'}</strong>?
-              </p>
-            </div>
-            <div className="flex items-center space-x-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setRecordToDelete(null)}
-                className="flex-1 py-2.5 px-4 bg-slate-100 text-slate-700 font-bold text-xs rounded-xl hover:bg-slate-200 transition-all cursor-pointer"
-              >
-                Hủy bỏ
-              </button>
-              <button
-                type="button"
-                onClick={confirmDeleteRecord}
-                className="flex-1 py-2.5 px-4 bg-red-600 text-white font-black text-xs rounded-xl shadow-xs hover:bg-red-700 transition-all cursor-pointer flex items-center justify-center space-x-1.5"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Xóa ngay</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   );

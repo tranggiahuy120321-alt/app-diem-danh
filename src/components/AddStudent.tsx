@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CLASSES } from '../config';
-import { addStudentApi, getStudentsByClass } from '../services/api';
+import { addStudentApi } from '../services/api';
 import { Student, ToastMessage } from '../types';
 import { UserPlus, User, GraduationCap, Phone, Heart, CheckCircle, RefreshCw } from 'lucide-react';
 
@@ -52,7 +52,7 @@ export const AddStudent: React.FC<AddStudentProps> = ({ onStudentAdded, addToast
         addToast({
           type: 'success',
           title: 'Thành công!',
-          message: `Đã gửi yêu cầu thêm bé ${fullName.trim()} vào lớp ${className}. Đang đồng bộ Google Sheets...`,
+          message: `Đã thêm bé ${fullName.trim()} vào lớp ${className}`,
         });
 
         const newStudent = result.newStudent;
@@ -61,11 +61,6 @@ export const AddStudent: React.FC<AddStudentProps> = ({ onStudentAdded, addToast
         if (onStudentAdded) {
           onStudentAdded(newStudent);
         }
-
-        // Re-fetch from Google Sheets after 1.5s
-        setTimeout(() => {
-          getStudentsByClass('Tất cả');
-        }, 1500);
 
         // Reset form
         setFullName('');

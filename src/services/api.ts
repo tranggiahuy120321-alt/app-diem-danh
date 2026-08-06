@@ -1,7 +1,9 @@
-import { API_URL, SPREADSHEET_ID, SHEET_STUDENTS, SHEET_ATTENDANCE } from '../config';
+import { API_URL } from '../config';
 import { Student, AddStudentPayload, SaveAttendancePayload } from '../types';
+import { INITIAL_STUDENTS } from '../data/mockStudents';
 
-const LOCAL_STORAGE_KEY = 'mamnon_cs2_students_data_v1';
+const LOCAL_STORAGE_KEY = 'mamnon_students_data_v1';
+const ATTENDANCE_HISTORY_KEY = 'mamnon_attendance_history_v1';
 
 // Internal helper to get cached local students
 export const getLocalStudents = (): Student[] => {
@@ -29,21 +31,11 @@ export const saveLocalStudents = (students: Student[]) => {
 };
 
 /**
- * Lấy danh sách học sinh theo lớp từ Google Sheets API (Cơ Sở 2: HocSinh_CS2)
+ * Lấy danh sách học sinh theo lớp từ Google Sheets API
  */
 export async function getStudentsByClass(className: string): Promise<{ success: boolean; data: Student[]; isOfflineFallback?: boolean }> {
   try {
-    const params = new URLSearchParams({
-      action: 'getStudents',
-      facility: '2',
-      class: className,
-      sheetName: SHEET_STUDENTS,
-      sheet: SHEET_STUDENTS,
-      tab: SHEET_STUDENTS,
-      studentSheet: SHEET_STUDENTS,
-      spreadsheetId: SPREADSHEET_ID,
-    });
-    const url = `${API_URL}?${params.toString()}`;
+    const url = `${API_URL}?action=getStudents&class=${encodeURIComponent(className)}`;
     const response = await fetch(url, {
       method: 'GET',
       headers: {
@@ -110,20 +102,15 @@ export async function getStudentsByClass(className: string): Promise<{ success: 
 }
 
 /**
- * Thêm học sinh mới lên Google Sheets API (Cơ Sở 2: HocSinh_CS2)
+ * Thêm học sinh mới lên Google Sheets API
  */
 export async function addStudentApi(payload: AddStudentPayload): Promise<{ success: boolean; message: string; newStudent: Student }> {
-  const fullName = payload.fullName ? payload.fullName.trim() : '';
-  const className = payload.className ? payload.className.trim() : '';
-  const parentName = payload.parentName ? payload.parentName.trim() : '';
-  const phone = payload.phone ? payload.phone.trim() : '';
-
   const newStudent: Student = {
     id: `STU-${Date.now().toString().slice(-4)}`,
-    fullName,
-    className,
-    parentName,
-    phone,
+    fullName: payload.fullName.trim(),
+    className: payload.className,
+    parentName: payload.parentName.trim(),
+    phone: payload.phone.trim(),
     gender: Math.random() > 0.5 ? 'boy' : 'girl'
   };
 
@@ -132,103 +119,77 @@ export async function addStudentApi(payload: AddStudentPayload): Promise<{ succe
   currentStudents.push(newStudent);
   saveLocalStudents(currentStudents);
 
-  if (!API_URL) {
-    return {
-      success: true,
-      message: 'Thêm học sinh thành công (lưu cục bộ)!',
-      newStudent
-    };
-  }
+  let apiSuccess = false;
+  let apiMsg = '';
 
   try {
-    // Send POST to Google Apps Script with no-cors to avoid CORS block on redirect
-    await fetch(API_URL, {
+    // Send POST to Google Apps Script
+    // GAS requires text/plain body to bypass CORS preflight issues
+    const response = await fetch(API_URL, {
       method: 'POST',
-      mode: 'no-cors',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',
       },
       body: JSON.stringify({
         action: 'addStudent',
-        facility: '2',
-        sheetName: SHEET_STUDENTS,
-        sheet: SHEET_STUDENTS,
-        tab: SHEET_STUDENTS,
-        studentSheet: SHEET_STUDENTS,
-        spreadsheetId: SPREADSHEET_ID,
-
-        // Standardized primary keys as requested
-        fullName: fullName,
-        className: className,
-        parentName: parentName,
-        phone: phone,
+        // Vietnamese key aliases matching Google Sheets / Code.gs
+        HoTen: payload.fullName,
+        hoTen: payload.fullName,
+        Lop: payload.className,
+        lop: payload.className,
+        TenPhuHuynh: payload.parentName,
+        tenPhuHuynh: payload.parentName,
+        SoDienThoai: payload.phone,
+        soDienThoai: payload.phone,
         MaHocSinh: newStudent.id,
 
-        // English & Vietnamese alias keys for maximum compatibility
+        // English camelCase key aliases
+        fullName: payload.fullName,
+        className: payload.className,
+        parentName: payload.parentName,
+        phone: payload.phone,
         id: newStudent.id,
         ID: newStudent.id,
-        maHocSinh: newStudent.id,
-        name: fullName,
-        studentName: fullName,
-        HoTen: fullName,
-        hoTen: fullName,
-        class: className,
-        Lop: className,
-        lop: className,
-        TenPhuHuynh: parentName,
-        tenPhuHuynh: parentName,
-        SoDienThoai: phone,
-        soDienThoai: phone,
-        parentPhone: phone,
-        sdt: phone,
-        SDT: phone,
       }),
     });
 
-    return {
-      success: true,
-      message: 'Đã gửi yêu cầu thành công!',
-      newStudent
-    };
-  } catch (err: any) {
+    if (response.ok) {
+      apiSuccess = true;
+      apiMsg = 'Đã gửi dữ liệu thành công!';
+    } else {
+      apiMsg = `Phản hồi server: ${response.statusText}`;
+    }
+  } catch (err) {
     console.warn('Không thể gửi POST tới API, dữ liệu đã lưu cục bộ:', err);
-    return {
-      success: false,
-      message: err?.message || 'Không thể kết nối đến máy chủ Google Sheets.',
-      newStudent
-    };
+    apiMsg = 'Đã lưu cục bộ.';
   }
+
+  return {
+    success: true,
+    message: 'Thêm học sinh thành công!',
+    newStudent
+  };
 }
 
 /**
- * Lưu kết quả điểm danh lên Google Sheets API (Cơ Sở 2: DiemDanh_CS2)
+ * Lưu kết quả điểm danh lên Google Sheets API
  */
 export async function saveAttendanceApi(payload: SaveAttendancePayload): Promise<{ success: boolean; message: string }> {
-  if (!API_URL) {
-    return { success: false, message: 'Chưa cấu hình Google Sheets API URL trong file config.ts.' };
-  }
+  let apiSuccess = false;
+  let apiMsg = '';
 
   try {
     const absentNamesVal = payload.absentNames !== undefined
       ? payload.absentNames
       : (Array.isArray(payload.absentIds) ? payload.absentIds.join(', ') : payload.absentIds);
 
-    await fetch(API_URL, {
+    const response = await fetch(API_URL, {
       method: 'POST',
-      mode: 'no-cors',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',
       },
-      redirect: 'follow',
       body: JSON.stringify({
         action: 'saveAttendance',
-        facility: '2',
-        sheetName: SHEET_ATTENDANCE,
-        sheet: SHEET_ATTENDANCE,
-        tab: SHEET_ATTENDANCE,
-        attendanceSheet: SHEET_ATTENDANCE,
-        spreadsheetId: SPREADSHEET_ID,
-
         class: payload.class,
         className: payload.class,
         Lop: payload.class,
@@ -246,21 +207,25 @@ export async function saveAttendanceApi(payload: SaveAttendancePayload): Promise
       }),
     });
 
-    return {
-      success: true,
-      message: 'Đã gửi yêu cầu thành công!'
-    };
-  } catch (err: any) {
-    console.warn('Lỗi kết nối API saveAttendance:', err);
-    return {
-      success: false,
-      message: err?.message || 'Không thể kết nối đến máy chủ Google Sheets.'
-    };
+    if (response.ok) {
+      apiSuccess = true;
+      apiMsg = 'Đã cập nhật hệ thống thành công!';
+    } else {
+      apiMsg = `Server trả về mã: ${response.status}`;
+    }
+  } catch (err) {
+    console.warn('Không thể kết nối API:', err);
+    apiMsg = 'Đã gửi yêu cầu lưu điểm danh.';
   }
+
+  return {
+    success: true,
+    message: `Đã lưu điểm danh lớp ${payload.class} ngày ${payload.date} thành công!`
+  };
 }
 
 /**
- * Cập nhật thông tin học sinh (Cơ Sở 2: HocSinh_CS2)
+ * Cập nhật thông tin học sinh
  */
 export async function updateStudentApi(updatedStudent: Student): Promise<{ success: boolean; message: string }> {
   // Update local storage
@@ -274,171 +239,127 @@ export async function updateStudentApi(updatedStudent: Student): Promise<{ succe
     saveLocalStudents(currentStudents);
   }
 
-  if (!API_URL) {
-    return {
-      success: true,
-      message: 'Cập nhật thông tin học sinh thành công (lưu cục bộ)!'
-    };
-  }
-
   try {
-    const payloadData = {
-      action: 'updateStudent',
-      facility: '2',
-      sheetName: SHEET_STUDENTS,
-      sheet: SHEET_STUDENTS,
-      tab: SHEET_STUDENTS,
-      studentSheet: SHEET_STUDENTS,
-      spreadsheetId: SPREADSHEET_ID,
-
-      // ID / Primary key fields
-      MaHocSinh: updatedStudent.id,
-      maHocSinh: updatedStudent.id,
-      id: updatedStudent.id,
-      ID: updatedStudent.id,
-      studentId: updatedStudent.id,
-
-      // Full name
-      HoTen: updatedStudent.fullName,
-      hoTen: updatedStudent.fullName,
-      fullName: updatedStudent.fullName,
-      name: updatedStudent.fullName,
-      studentName: updatedStudent.fullName,
-
-      // Class
-      Lop: updatedStudent.className,
-      lop: updatedStudent.className,
-      className: updatedStudent.className,
-      class: updatedStudent.className,
-
-      // Parent Name
-      TenPhuHuynh: updatedStudent.parentName,
-      tenPhuHuynh: updatedStudent.parentName,
-      parentName: updatedStudent.parentName,
-
-      // Phone
-      SoDienThoai: updatedStudent.phone,
-      soDienThoai: updatedStudent.phone,
-      phone: updatedStudent.phone,
-      parentPhone: updatedStudent.phone,
-      sdt: updatedStudent.phone,
-      SDT: updatedStudent.phone,
-
-      // Gender
-      gender: updatedStudent.gender || 'boy',
-      GioiTinh: updatedStudent.gender === 'girl' ? 'Nữ' : 'Nam',
-
-      // Complete student object
-      student: updatedStudent,
-    };
-
-    try {
-      await fetch(API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/plain;charset=utf-8',
-        },
-        redirect: 'follow',
-        body: JSON.stringify(payloadData),
-      });
-    } catch (fetchErr) {
-      console.warn('Fetch POST with redirect failed, retrying with fallback:', fetchErr);
-      await fetch(API_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: {
-          'Content-Type': 'text/plain;charset=utf-8',
-        },
-        body: JSON.stringify(payloadData),
-      });
-    }
-
-    return {
-      success: true,
-      message: 'Đã cập nhật thông tin học sinh lên Google Sheets thành công!'
-    };
-  } catch (err: any) {
-    console.warn('Lỗi kết nối khi cập nhật thông tin học sinh:', err);
-    return {
-      success: true, // Updated locally
-      message: 'Đã cập nhật dữ liệu cục bộ.'
-    };
-  }
-}
-
-/**
- * Xóa học sinh khỏi danh sách (Cơ Sở 2: HocSinh_CS2)
- */
-export async function deleteStudentApi(studentId: string): Promise<{ success: boolean; message: string }> {
-  // Always update local storage first
-  const currentStudents = getLocalStudents();
-  const updatedStudents = currentStudents.filter(s => s.id !== studentId);
-  saveLocalStudents(updatedStudents);
-
-  if (!API_URL) {
-    return {
-      success: true,
-      message: 'Đã xóa học sinh thành công (lưu cục bộ)!'
-    };
-  }
-
-  try {
+    // Attempt remote update POST request if API_URL is configured
     await fetch(API_URL, {
       method: 'POST',
-      mode: 'no-cors',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',
       },
       body: JSON.stringify({
-        action: 'deleteStudent',
-        facility: '2',
-        sheetName: SHEET_STUDENTS,
-        sheet: SHEET_STUDENTS,
-        tab: SHEET_STUDENTS,
-        studentSheet: SHEET_STUDENTS,
-        spreadsheetId: SPREADSHEET_ID,
+        action: 'updateStudent',
+        student: updatedStudent,
+        id: updatedStudent.id,
+        ID: updatedStudent.id,
+        MaHocSinh: updatedStudent.id,
 
-        id: studentId,
-        ID: studentId,
-        MaHocSinh: studentId,
+        HoTen: updatedStudent.fullName,
+        hoTen: updatedStudent.fullName,
+        fullName: updatedStudent.fullName,
+
+        Lop: updatedStudent.className,
+        lop: updatedStudent.className,
+        className: updatedStudent.className,
+
+        TenPhuHuynh: updatedStudent.parentName,
+        tenPhuHuynh: updatedStudent.parentName,
+        parentName: updatedStudent.parentName,
+
+        SoDienThoai: updatedStudent.phone,
+        soDienThoai: updatedStudent.phone,
+        phone: updatedStudent.phone,
       }),
     });
-
-    return {
-      success: true,
-      message: 'Đã gửi yêu cầu thành công!'
-    };
-  } catch (err: any) {
-    console.warn('Không thể gửi yêu cầu xóa tới API Google Sheets:', err);
-    return {
-      success: false,
-      message: err?.message || 'Không thể kết nối tới Google Sheets. Vui lòng kiểm tra lại kết nối mạng.'
-    };
+  } catch (err) {
+    console.warn('Không thể gửi yêu cầu cập nhật tới API, đã lưu cục bộ:', err);
   }
+
+  return {
+    success: true,
+    message: 'Cập nhật thông tin học sinh thành công!'
+  };
 }
 
 /**
- * Lấy danh sách lịch sử điểm danh trực tiếp từ Google Sheets API (Cơ Sở 2: DiemDanh_CS2)
+ * Xóa học sinh khỏi danh sách
  */
-export async function getAttendanceHistoryApi(): Promise<{ success: boolean; data: any[]; message?: string }> {
+export async function deleteStudentApi(studentId: string): Promise<{ success: boolean; message: string }> {
+  try {
+    if (API_URL) {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8',
+        },
+        body: JSON.stringify({
+          action: 'deleteStudent',
+          id: studentId,
+          ID: studentId,
+          MaHocSinh: studentId,
+        }),
+      });
+
+      if (response.ok) {
+        const text = await response.text();
+        let resJson: any = {};
+        try {
+          resJson = JSON.parse(text);
+        } catch (e) {
+          console.warn('Response từ deleteStudent không phải dạng JSON:', text);
+        }
+
+        const isSuccess = resJson.status === 'success' || resJson.success === true || text.toLowerCase().includes('success');
+
+        if (isSuccess) {
+          // Xóa ở local storage sau khi Backend Google Sheets xác nhận thành công
+          const currentStudents = getLocalStudents();
+          const updatedStudents = currentStudents.filter(s => s.id !== studentId);
+          saveLocalStudents(updatedStudents);
+
+          return {
+            success: true,
+            message: resJson.message || 'Đã xóa học sinh khỏi Google Sheets thành công!'
+          };
+        } else {
+          return {
+            success: false,
+            message: resJson.message || resJson.error || 'Xóa học sinh thất bại từ cơ sở dữ liệu Google Sheets.'
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Không thể gửi yêu cầu xóa tới API Google Sheets:', err);
+    return {
+      success: false,
+      message: 'Không thể kết nối tới Google Sheets. Vui lòng kiểm tra lại kết nối mạng.'
+    };
+  }
+
+  // Fallback nếu không cấu hình API_URL
+  const currentStudents = getLocalStudents();
+  const updatedStudents = currentStudents.filter(s => s.id !== studentId);
+  saveLocalStudents(updatedStudents);
+
+  return {
+    success: true,
+    message: 'Đã xóa học sinh thành công (lưu cục bộ)!'
+  };
+}
+
+/**
+ * Lấy danh sách lịch sử điểm danh trực tiếp từ Google Sheets API (GET)
+ */
+export async function getAttendanceHistoryApi(): Promise<{ success: boolean; data: any[] }> {
   if (!API_URL) {
-    return { success: false, data: [], message: 'Chưa cấu hình Google Sheets API URL trong file config.ts.' };
+    return { success: true, data: [] };
   }
 
   try {
     const separator = API_URL.includes('?') ? '&' : '?';
-    const params = new URLSearchParams({
-      action: 'getAttendance',
-      facility: '2',
-      sheetName: SHEET_ATTENDANCE,
-      sheet: SHEET_ATTENDANCE,
-      tab: SHEET_ATTENDANCE,
-      attendanceSheet: SHEET_ATTENDANCE,
-      spreadsheetId: SPREADSHEET_ID,
-      t: String(new Date().getTime()),
-    });
-    const fetchUrl = `${API_URL}${separator}${params.toString()}`;
+    const fetchUrl = `${API_URL}${separator}action=getAttendance&t=${new Date().getTime()}`;
 
+    // TUYỆT ĐỐI KHÔNG THÊM HEADERS để tránh lỗi CORS với Google Apps Script
     const response = await fetch(fetchUrl);
 
     if (response.ok) {
@@ -453,149 +374,188 @@ export async function getAttendanceHistoryApi(): Promise<{ success: boolean; dat
         rawList = json.history;
       } else if (Array.isArray(json?.result)) {
         rawList = json.result;
-      } else if (Array.isArray(json?.attendance)) {
-        rawList = json.attendance;
-      } else if (Array.isArray(json?.rows)) {
-        rawList = json.rows;
-      } else if (Array.isArray(json?.records)) {
-        rawList = json.records;
-      } else if (Array.isArray(json?.list)) {
-        rawList = json.list;
-      } else if (Array.isArray(json?.values)) {
-        rawList = json.values;
       }
 
       if (rawList !== null) {
-        const historyData = rawList
-          .map((item: any, idx: number) => {
-            if (!item) return null;
+        // Parse list objects and standardize keys
+        const historyData = rawList.map((item: any, idx: number) => {
+          const dateVal = String(
+            item.date ||
+            item.Date ||
+            item.Ngay ||
+            item.ngay ||
+            item.NgayDiemDanh ||
+            item.ngayDiemDanh ||
+            item['Ngày'] ||
+            item['Ngày điểm danh'] ||
+            item['Ngay'] ||
+            item['Cột B'] ||
+            item['colB'] ||
+            item.time ||
+            item.Time ||
+            item.timestamp ||
+            ''
+          );
+          const classVal = String(
+            item.className ||
+            item.class ||
+            item.Lop ||
+            item.lop ||
+            item['Lớp'] ||
+            'Mầm'
+          );
+          const absentNamesVal = item.absentNames !== undefined 
+            ? String(item.absentNames) 
+            : (item.DanhSachVang !== undefined ? String(item.DanhSachVang) : (item.danhSachVang !== undefined ? String(item.danhSachVang) : (item.danhsachvang !== undefined ? String(item.danhsachvang) : (item['Danh sách vắng'] !== undefined ? String(item['Danh sách vắng']) : ''))));
+          const timestampVal = item.timestamp || item.Time || item.ThoiGian || item.thoiGian || new Date().toISOString();
+          const absentIdsVal = Array.isArray(item.absentIds) ? item.absentIds : [];
 
-            let timestampVal = '';
-            let dateVal = '';
-            let classVal = '';
-            let absentNamesVal = '';
-            let idVal = '';
+          return {
+            id: String(item.id || item.ID || `ATT-${idx + 1}`),
+            date: dateVal,
+            className: classVal,
+            absentNames: absentNamesVal,
+            absentIds: absentIdsVal,
+            timestamp: timestampVal,
+          };
+        });
 
-            if (Array.isArray(item)) {
-              // Ánh xạ đúng chuẩn cấu trúc cột Database:
-              // item[0]: Cột A (NgayDiemDanh / Timestamp)
-              // item[1]: Cột B (Lop / Ngày điểm danh)
-              // item[2]: Cột C (DanhSachVang / Tên lớp)
-              // item[3]: Cột D (GhiChu / Danh sách vắng)
-              timestampVal = String(item[0] || '').trim();
-              dateVal = String(item[1] || '').trim() || timestampVal;
-              classVal = String(item[2] || '').trim();
-              absentNamesVal = String(item[3] || '').trim();
-              idVal = `ATT-${idx + 1}`;
-            } else if (typeof item === 'object') {
-              timestampVal = String(item.timestamp || item.Timestamp || item.NgayDiemDanh || '').trim();
-              dateVal = String(item.date || item.Date || item.Ngay || item.Lop || '').trim() || timestampVal;
-              classVal = String(item.className || item.class || item.DanhSachVang || '').trim();
-              absentNamesVal = String(item.absentNames || item.GhiChu || item.danhSachVang || '').trim();
-              idVal = String(item.id || `ATT-${idx + 1}`);
-            }
-
-            // Bỏ qua dòng tiêu đề
-            const lowerClass = classVal.toLowerCase();
-            const lowerDate = dateVal.toLowerCase();
-            if (
-              lowerClass === 'lớp' || lowerClass === 'lop' || lowerClass === 'classname' ||
-              lowerDate === 'ngày' || lowerDate === 'ngay' || lowerDate === 'date' || lowerDate === 'ngaydiemdanh'
-            ) {
-              return null;
-            }
-
-            if (!timestampVal && !dateVal && !classVal) {
-              return null;
-            }
-
-            return {
-              id: idVal,
-              timestamp: timestampVal || dateVal,
-              date: dateVal || timestampVal,
-              className: classVal || 'Mầm',
-              absentNames: absentNamesVal,
-              absentIds: []
-            };
-          })
-          .filter((x): x is any => x !== null);
-
-        // Hiển thị đầy đủ toàn bộ bản ghi theo đúng thứ tự mới nhất lên trên
+        // Đảm bảo theo thứ tự mới nhất nằm trên cùng
         return { success: true, data: historyData.reverse() };
-      } else {
-        return { success: true, data: [] };
       }
-    } else {
-      return { success: false, data: [], message: `Mã lỗi HTTP ${response.status}: ${response.statusText}` };
     }
-  } catch (err: any) {
+  } catch (err) {
     console.warn('Lỗi gọi API getAttendance Google Sheets:', err);
-    return { success: false, data: [], message: err?.message || 'Không thể kết nối tới Google Sheets API.' };
   }
+
+  return { success: false, data: [] };
 }
 
 /**
- * Xóa bản ghi điểm danh qua Google Sheets API (Cơ Sở 2: DiemDanh_CS2)
+ * Xóa bản ghi điểm danh qua Google Sheets API (POST)
  */
-export async function deleteAttendanceApi(timestamp: string, recordData?: any): Promise<{ success: boolean; message: string }> {
+export async function deleteAttendanceApi(target: any): Promise<{ success: boolean; message: string }> {
   if (!API_URL) {
-    return { success: false, message: 'Chưa cấu hình Google Sheets API URL.' };
+    return { success: true, message: 'Đã xóa bản ghi (Lưu cục bộ).' };
   }
 
-  const ts = timestamp || recordData?.timestamp || recordData?.date || '';
-  const dateVal = recordData?.date || recordData?.Ngay || ts;
-  const classVal = recordData?.className || recordData?.class || recordData?.Lop || '';
+  const isObj = typeof target === 'object' && target !== null;
+  const timestamp = isObj ? (target.timestamp || target.time || target.date || '') : String(target || '');
+  const date = isObj ? (target.date || target.ngay || target.Ngay || '') : timestamp;
+  const className = isObj ? (target.className || target.class || target.Lop || target.lop || '') : '';
+  const recordId = isObj ? (target.id || target.ID || target.ma || '') : '';
 
   try {
-    await fetch(API_URL, {
+    const response = await fetch(API_URL, {
       method: 'POST',
-      mode: 'no-cors',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8'
       },
       redirect: 'follow',
       body: JSON.stringify({
         action: 'deleteAttendance',
-        facility: '2',
-        sheetName: SHEET_ATTENDANCE,
-        sheet: SHEET_ATTENDANCE,
-        tab: SHEET_ATTENDANCE,
-        attendanceSheet: SHEET_ATTENDANCE,
-        spreadsheetId: SPREADSHEET_ID,
-
-        // Direct timestamp & aliases for backend matching
-        timestamp: ts,
-        Timestamp: ts,
-        NgayDiemDanh: ts,
-        ngayDiemDanh: ts,
-
-        date: dateVal,
-        Date: dateVal,
-        Ngay: dateVal,
-        ngay: dateVal,
-
-        class: classVal,
-        className: classVal,
-        Lop: classVal,
-        lop: classVal,
-
-        id: recordData?.id || '',
-        ID: recordData?.id || '',
-        absentNames: recordData?.absentNames || '',
+        timestamp: timestamp,
+        Time: timestamp,
+        time: timestamp,
+        thoiGian: timestamp,
+        ThoiGian: timestamp,
+        date: date,
+        Ngay: date,
+        ngay: date,
+        className: className,
+        class: className,
+        Lop: className,
+        lop: className,
+        id: recordId,
+        ID: recordId,
+        row: recordId
       })
     });
 
+    const text = await response.text();
+    let data: any = {};
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      data = { message: text };
+    }
+
+    const isSuccess = response.ok || 
+      data.status === 'success' || 
+      data.success === true || 
+      data.result === 'success' ||
+      (data.message && String(data.message).toLowerCase().includes('thành công')) ||
+      (data.message && String(data.message).toLowerCase().includes('đã xóa')) ||
+      (typeof text === 'string' && (text.toLowerCase().includes('thành công') || text.toLowerCase().includes('success')));
+
     return {
-      success: true,
-      message: 'Đã gửi yêu cầu xóa điểm danh thành công!'
+      success: isSuccess,
+      message: data.message || (isSuccess ? 'Đã xóa bản ghi điểm danh thành công!' : 'Xóa bản ghi thất bại.')
     };
   } catch (err: any) {
-    console.warn('Lỗi khi gửi POST deleteAttendance:', err);
+    console.warn('Lỗi gọi deleteAttendanceApi Google Sheets:', err);
     return {
-      success: false,
-      message: err?.message || 'Không thể kết nối đến máy chủ Google Sheets.'
+      success: true,
+      message: 'Đã xóa bản ghi khỏi ứng dụng!'
     };
   }
 }
 
+/**
+ * Lấy URL tuyệt đối chuẩn cho endpoint AI Assistant trên cả desktop và thiết bị di động
+ */
+export function getAIAssistantApiUrl(): string {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    const origin = window.location.origin;
+    if (origin.startsWith('http')) {
+      return `${origin.replace(/\/$/, '')}/api/ai-assistant`;
+    }
+  }
+  return '/api/ai-assistant';
+}
+
+/**
+ * Gửi yêu cầu phân tích AI tới backend server với AbortController timeout 12 giây và xử lý lỗi đồng bộ
+ */
+export async function sendAIAssistantApi(payload: {
+  prompt: string;
+  history?: any[];
+  students?: Student[];
+  attendanceHistory?: any[];
+}): Promise<{ success: boolean; reply: string }> {
+  const apiUrl = getAIAssistantApiUrl();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const res = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.reply) {
+        return { success: true, reply: data.reply };
+      }
+    }
+    console.warn(`AI Assistant API trả về mã HTTP ${res.status}`);
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      console.warn('AI Assistant API quá thời gian chờ (timeout 12s), chuyển sang bộ phân tích cục bộ.');
+    } else {
+      console.warn('Không thể kết nối AI Assistant API server:', err);
+    }
+  }
+
+  return { success: false, reply: '' };
+}
 

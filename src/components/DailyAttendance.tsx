@@ -31,10 +31,7 @@ export const DailyAttendance: React.FC<DailyAttendanceProps> = ({
   const [selectedClass, setSelectedClass] = useState<string>('Lớp dưới');
   const [attendanceDate, setAttendanceDate] = useState<string>(() => {
     const today = new Date();
-    const y = today.getFullYear();
-    const m = String(today.getMonth() + 1).padStart(2, '0');
-    const d = String(today.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    return today.toISOString().split('T')[0];
   });
 
   const [students, setStudents] = useState<Student[]>([]);
@@ -165,12 +162,9 @@ export const DailyAttendance: React.FC<DailyAttendanceProps> = ({
       if (res.success) {
         addToast({
           type: 'success',
-          title: 'Đã gửi điểm danh!',
-          message: 'Đã gửi yêu cầu thành công! Đang tự động làm mới dữ liệu từ Google Sheets...',
+          title: 'Lưu thành công!',
+          message: res.message,
         });
-        setTimeout(() => {
-          fetchStudents(selectedClass);
-        }, 1500);
       } else {
         addToast({
           type: 'error',
@@ -420,13 +414,9 @@ export const DailyAttendance: React.FC<DailyAttendanceProps> = ({
                   </div>
 
                   {/* Student Info */}
-                  <h4 className={`font-black text-base leading-tight ${isAbsent ? 'text-red-900' : 'text-slate-800'}`}>
+                  <h4 className={`font-black text-base leading-tight mb-2 ${isAbsent ? 'text-red-900' : 'text-slate-800'}`}>
                     {student.fullName}
                   </h4>
-
-                  <p className={`text-[10px] font-extrabold mb-3 uppercase tracking-wider ${isAbsent ? 'text-red-400' : 'text-slate-400'}`}>
-                    ID: #{student.id}
-                  </p>
 
                   {student.phone && (
                     <a
