@@ -1,6 +1,8 @@
 {
-  "name": "Mầm non Hướng Dương",
+  "name": "Remix Điểm danh Mầm non Hướng Dương 2",
   "description": "Ứng dụng điểm danh Mầm non Hướng Dương tối giản, thân thiện, thao tác nhanh trên điện thoại và máy tính.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

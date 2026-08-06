@@ -1,5 +1,5 @@
 import React from 'react';
-import { ClipboardCheck, Users, UserPlus, BarChart3, Sparkles, Bot } from 'lucide-react';
+import { ClipboardCheck, Users, UserPlus, BarChart3, Bot } from 'lucide-react';
 import { Logo } from './Logo';
 
 export type NavTab = 'attendance' | 'students' | 'addStudent' | 'reports' | 'aiAssistant';
@@ -23,11 +23,8 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, totalSt
           <div>
             <div className="flex items-center space-x-2">
               <h1 className="font-black text-lg sm:text-2xl text-slate-800 tracking-tight leading-tight flex items-center gap-1.5">
-                <span>Mầm non Hướng Dương</span>
+                <span>Mầm non Hướng Dương 2</span>
               </h1>
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800">
-                <Sparkles className="w-2.5 h-2.5 mr-0.5 text-amber-600" /> V1.0
-              </span>
             </div>
             <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest hidden sm:block">
               Hệ Thống Điểm Danh Mầm Non • Hotline: 0795.497.309
@@ -58,7 +55,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, totalSt
             }`}
           >
             <Users className={`w-4 h-4 mr-1.5 ${activeTab === 'students' ? 'text-blue-600' : 'text-slate-400'}`} />
-            Danh Sách Học Sinh
+            Danh Sách
           </button>
 
           <button
@@ -89,11 +86,11 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, totalSt
             onClick={() => setActiveTab('aiAssistant')}
             className={`flex items-center px-3.5 lg:px-4 py-2 text-sm font-black rounded-full transition-all cursor-pointer ${
               activeTab === 'aiAssistant'
-                ? 'bg-amber-400 text-slate-900 shadow-sm border border-amber-300'
-                : 'text-amber-800 hover:text-amber-900 bg-amber-100/60'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm'
+                : 'text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50'
             }`}
           >
-            <Bot className={`w-4 h-4 mr-1.5 ${activeTab === 'aiAssistant' ? 'text-slate-900' : 'text-amber-600'}`} />
+            <Bot className={`w-4 h-4 mr-1.5 ${activeTab === 'aiAssistant' ? 'text-white' : 'text-indigo-600'}`} />
             Trợ Lý AI
           </button>
         </nav>
@@ -117,7 +114,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, totalSt
       <div className="flex sm:hidden mt-3 p-1 bg-slate-100 rounded-full border border-slate-200 justify-around overflow-x-auto gap-0.5">
         <button
           onClick={() => setActiveTab('attendance')}
-          className={`flex-1 py-2 px-2 text-[11px] font-black rounded-full flex items-center justify-center space-x-1 transition-all whitespace-nowrap ${
+          className={`flex-1 py-2 px-1.5 text-[11px] font-black rounded-full flex items-center justify-center space-x-1 transition-all whitespace-nowrap ${
             activeTab === 'attendance'
               ? 'bg-blue-600 text-white shadow-sm'
               : 'text-slate-600'
@@ -129,7 +126,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, totalSt
 
         <button
           onClick={() => setActiveTab('students')}
-          className={`flex-1 py-2 px-2 text-[11px] font-black rounded-full flex items-center justify-center space-x-1 transition-all whitespace-nowrap ${
+          className={`flex-1 py-2 px-1.5 text-[11px] font-black rounded-full flex items-center justify-center space-x-1 transition-all whitespace-nowrap ${
             activeTab === 'students'
               ? 'bg-blue-600 text-white shadow-sm'
               : 'text-slate-600'
@@ -141,7 +138,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, totalSt
 
         <button
           onClick={() => setActiveTab('addStudent')}
-          className={`flex-1 py-2 px-2 text-[11px] font-black rounded-full flex items-center justify-center space-x-1 transition-all whitespace-nowrap ${
+          className={`flex-1 py-2 px-1.5 text-[11px] font-black rounded-full flex items-center justify-center space-x-1 transition-all whitespace-nowrap ${
             activeTab === 'addStudent'
               ? 'bg-blue-600 text-white shadow-sm'
               : 'text-slate-600'
@@ -153,7 +150,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, totalSt
 
         <button
           onClick={() => setActiveTab('reports')}
-          className={`flex-1 py-2 px-2 text-[11px] font-black rounded-full flex items-center justify-center space-x-1 transition-all whitespace-nowrap ${
+          className={`flex-1 py-2 px-1.5 text-[11px] font-black rounded-full flex items-center justify-center space-x-1 transition-all whitespace-nowrap ${
             activeTab === 'reports'
               ? 'bg-blue-600 text-white shadow-sm'
               : 'text-slate-600'
@@ -165,10 +162,10 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, totalSt
 
         <button
           onClick={() => setActiveTab('aiAssistant')}
-          className={`flex-1 py-2 px-2 text-[11px] font-black rounded-full flex items-center justify-center space-x-1 transition-all whitespace-nowrap ${
+          className={`flex-1 py-2 px-1.5 text-[11px] font-black rounded-full flex items-center justify-center space-x-1 transition-all whitespace-nowrap ${
             activeTab === 'aiAssistant'
-              ? 'bg-amber-400 text-slate-900 shadow-sm'
-              : 'text-amber-800 bg-amber-100/80'
+              ? 'bg-indigo-600 text-white shadow-sm'
+              : 'text-indigo-700 font-extrabold'
           }`}
         >
           <Bot className="w-3.5 h-3.5" />

@@ -94,7 +94,7 @@ export default function App() {
         ) : activeTab === 'reports' ? (
           <Reports addToast={addToast} />
         ) : (
-          <AIAssistant addToast={addToast} onNavigateToTab={(tab) => setActiveTab(tab as NavTab)} />
+          <AIAssistant addToast={addToast} />
         )}
       </main>
 
@@ -105,7 +105,7 @@ export default function App() {
             <div className="w-5 h-5 flex items-center justify-center">
               <Logo className="w-full h-full" />
             </div>
-            <span>Mầm non Hướng Dương — 0795.497.309</span>
+            <span>Mầm non Hướng Dương 2 — 0795.497.309</span>
           </div>
         </div>
       </footer>
