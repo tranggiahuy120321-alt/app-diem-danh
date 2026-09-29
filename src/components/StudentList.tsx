@@ -37,7 +37,7 @@ export const StudentList: React.FC<StudentListProps> = ({
 
     try {
       const res = await getStudentsByClass('Tất cả');
-      if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+      if (res.success && Array.isArray(res.data)) {
         setStudents(res.data);
       }
     } catch (err) {
@@ -81,6 +81,8 @@ export const StudentList: React.FC<StudentListProps> = ({
           onStudentDeleted();
         }
         setStudentToEdit(null);
+      } else {
+        addToast({ type: 'error', title: 'Chưa cập nhật được', message: res.message });
       }
     } catch (error) {
       addToast({

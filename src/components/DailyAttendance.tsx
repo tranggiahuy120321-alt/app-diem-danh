@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CLASSES } from '../config';
-import { getStudentsByClass, saveAttendanceApi } from '../services/api';
+import { getLocalStudents, getStudentsByClass, saveAttendanceApi } from '../services/api';
 import { Student, ToastMessage } from '../types';
 import {
   Calendar,
@@ -31,10 +31,13 @@ export const DailyAttendance: React.FC<DailyAttendanceProps> = ({
   const [selectedClass, setSelectedClass] = useState<string>('Lớp dưới');
   const [attendanceDate, setAttendanceDate] = useState<string>(() => {
     const today = new Date();
-    return today.toISOString().split('T')[0];
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   });
 
-  const [students, setStudents] = useState<Student[]>([]);
+  const [allStudents, setStudents] = useState<Student[]>(getLocalStudents);
+  const students = useMemo(() => allStudents.filter(s => selectedClass === 'Tất cả' || s.className.trim().toLowerCase() === selectedClass.trim().toLowerCase()), [allStudents, selectedClass]);
+  const requestId = useRef(0);
+  const [loadError, setLoadError] = useState(false);
   // Mapping student ID -> isAbsent (true = Vắng mặt / Red, false = Đi học / Green)
   const [absentMap, setAbsentMap] = useState<Record<string, boolean>>({});
   // Optional reasons for absence
@@ -45,33 +48,22 @@ export const DailyAttendance: React.FC<DailyAttendanceProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterMode, setFilterMode] = useState<'all' | 'present' | 'absent'>('all');
 
-  // Load students when class changes or when reload signal changes
   useEffect(() => {
-    fetchStudents(selectedClass);
-  }, [selectedClass, studentsListSignal]);
+    fetchStudents();
+    return () => { requestId.current++; };
+  }, [studentsListSignal]);
 
-  const fetchStudents = async (className: string) => {
+  const fetchStudents = async (force = false) => {
+    const id = ++requestId.current;
     setIsLoading(true);
+    setLoadError(false);
     try {
-      const res = await getStudentsByClass(className);
-      if (res.success) {
-        setStudents(res.data);
-        // Reset absent map (default all present = false for isAbsent)
-        const initialMap: Record<string, boolean> = {};
-        res.data.forEach((s) => {
-          initialMap[s.id] = false;
-        });
-        setAbsentMap(initialMap);
-      }
-    } catch (err) {
-      console.error(err);
-      addToast({
-        type: 'error',
-        title: 'Lỗi tải danh sách',
-        message: 'Không thể tải danh sách học sinh. Vui lòng thử lại.',
-      });
+      const res = await getStudentsByClass('Tất cả', force);
+      if (id !== requestId.current) return;
+      setStudents(res.data);
+      setLoadError(Boolean(res.isOfflineFallback));
     } finally {
-      setIsLoading(false);
+      if (id === requestId.current) setIsLoading(false);
     }
   };
 
@@ -85,7 +77,7 @@ export const DailyAttendance: React.FC<DailyAttendanceProps> = ({
 
   // Batch actions
   const setAllPresent = () => {
-    const updated: Record<string, boolean> = {};
+    const updated: Record<string, boolean> = { ...absentMap };
     students.forEach((s) => {
       updated[s.id] = false;
     });
@@ -98,7 +90,7 @@ export const DailyAttendance: React.FC<DailyAttendanceProps> = ({
   };
 
   const setAllAbsent = () => {
-    const updated: Record<string, boolean> = {};
+    const updated: Record<string, boolean> = { ...absentMap };
     students.forEach((s) => {
       updated[s.id] = true;
     });
@@ -128,7 +120,7 @@ export const DailyAttendance: React.FC<DailyAttendanceProps> = ({
 
   // Statistics calculation
   const totalCount = students.length;
-  const absentCount = Object.values(absentMap).filter(Boolean).length;
+  const absentCount = students.filter(s => absentMap[s.id]).length;
   const presentCount = totalCount - absentCount;
 
   // Handle Save Attendance
@@ -187,6 +179,9 @@ export const DailyAttendance: React.FC<DailyAttendanceProps> = ({
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-28">
       
+      <div role="status" aria-live="polite" className="text-sm text-slate-600">
+        {isLoading ? 'Đang cập nhật danh sách từ Google Sheets…' : loadError ? 'Chưa kết nối được Google Sheets. Đang dùng danh sách đã lưu trên máy; bấm Tải lại để cập nhật.' : 'Danh sách đã cập nhật.'}
+      </div>
       {/* Top Bar: Class selection pills + Date + Quick Stats */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         
@@ -229,7 +224,7 @@ export const DailyAttendance: React.FC<DailyAttendanceProps> = ({
               <input
                 type="date"
                 value={attendanceDate}
-                onChange={(e) => setAttendanceDate(e.target.value)}
+                onChange={(e) => { setAttendanceDate(e.target.value); setAbsentMap({}); }}
                 className="w-full px-4 py-2.5 rounded-2xl border-2 border-slate-100 bg-slate-50 text-xs font-black text-slate-800 focus:border-blue-400 focus:bg-white focus:outline-none"
               />
             </div>
@@ -276,7 +271,7 @@ export const DailyAttendance: React.FC<DailyAttendanceProps> = ({
               </button>
 
               <button
-                onClick={() => fetchStudents(selectedClass)}
+                onClick={() => fetchStudents(true)}
                 disabled={isLoading}
                 title="Tải lại"
                 className="p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all cursor-pointer"
@@ -372,7 +367,7 @@ export const DailyAttendance: React.FC<DailyAttendanceProps> = ({
           </div>
         </div>
 
-        {isLoading ? (
+        {isLoading && allStudents.length === 0 ? (
           <div className="py-16 text-center space-y-3">
             <RefreshCw className="w-8 h-8 text-amber-500 animate-spin mx-auto" />
             <p className="text-sm font-black text-slate-600">Đang tải danh sách học sinh {selectedClass}...</p>
