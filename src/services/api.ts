@@ -1,17 +1,20 @@
 import { API_URL } from '../config';
 import { Student, AddStudentPayload, SaveAttendancePayload } from '../types';
-import { INITIAL_STUDENTS } from '../data/mockStudents';
 
 const LOCAL_STORAGE_KEY = 'mamnon_students_data_v1';
-const ATTENDANCE_HISTORY_KEY = 'mamnon_attendance_history_v1';
+let studentsRequest: Promise<any> | null = null;
+let studentsFreshUntil = 0;
+let studentsVersion = 0;
+let studentsMemory: Student[] | null = null;
 
 // Internal helper to get cached local students
 export const getLocalStudents = (): Student[] => {
   try {
+    if (studentsMemory !== null) return studentsMemory;
     const data = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (data) {
       const parsed: Student[] = JSON.parse(data);
-      if (Array.isArray(parsed)) {
+      if (Array.isArray(parsed) && parsed.every(s => s && typeof s.id === 'string' && typeof s.className === 'string')) {
         return parsed;
       }
     }
@@ -23,6 +26,10 @@ export const getLocalStudents = (): Student[] => {
 
 // Internal helper to save local students
 export const saveLocalStudents = (students: Student[]) => {
+  studentsMemory = students;
+  studentsFreshUntil = 0;
+  studentsVersion++;
+  window.dispatchEvent(new Event('students-updated'));
   try {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(students));
   } catch (e) {
@@ -30,13 +37,52 @@ export const saveLocalStudents = (students: Student[]) => {
   }
 };
 
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    // Read the body before clearing the timeout, including slow response bodies.
+    const body = await response.text();
+    return new Response(body, { status: response.status, statusText: response.statusText });
+  } finally { clearTimeout(timer); }
+}
+
+export async function getStudentsByClass(className: string, force = false): Promise<{ success: boolean; data: Student[]; isOfflineFallback?: boolean }> {
+  let result;
+  if (!force && Date.now() < studentsFreshUntil) {
+    result = { success: true, data: getLocalStudents() };
+  } else {
+    if (!studentsRequest) {
+      studentsRequest = fetchAllStudents(force).finally(() => { studentsRequest = null; });
+    }
+    result = await studentsRequest;
+  }
+  return { ...result, data: result.data.filter((s: Student) => !className || className === 'Tất cả' || s.className.trim().toLowerCase() === className.trim().toLowerCase()) };
+}
+
+async function postConfirmed(payload: unknown): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await fetchWithTimeout(API_URL, {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+    }, 30000);
+    const data = await response.json();
+    const success = response.ok && data.status !== 'error' && data.success !== false && (data.status === 'success' || data.success === true);
+    return { success, message: data.message || (success ? 'Đã lưu thành công.' : 'Máy chủ chưa xác nhận lưu thành công.') };
+  } catch {
+    return { success: false, message: 'Chưa xác nhận được kết quả lưu. Vui lòng kiểm tra báo cáo hoặc Google Sheets trước khi gửi lại để tránh trùng dữ liệu.' };
+  }
+}
+
 /**
  * Lấy danh sách học sinh theo lớp từ Google Sheets API
  */
-export async function getStudentsByClass(className: string): Promise<{ success: boolean; data: Student[]; isOfflineFallback?: boolean }> {
+async function fetchAllStudents(force = false): Promise<{ success: boolean; data: Student[]; isOfflineFallback?: boolean }> {
   try {
-    const url = `${API_URL}?action=getStudents&class=${encodeURIComponent(className)}`;
-    const response = await fetch(url, {
+    const version = studentsVersion;
+    const url = `${API_URL}?action=getStudents${force ? '&refresh=1' : ''}`;
+    const response = await fetchWithTimeout(url, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
@@ -76,16 +122,13 @@ export async function getStudentsByClass(className: string): Promise<{ success: 
           gender: (item.gender === 'girl' || item.GioiTinh === 'girl' || item.gioiTinh === 'Nữ' || item.gioiTinh === 'gái' || item.gioiTinh === 'girl') ? 'girl' : 'boy'
         }));
 
-        // Update local storage cache if fetched list is non-empty
-        if (fetchedStudents.length > 0) {
-          saveLocalStudents(fetchedStudents);
+        if (version !== studentsVersion) {
+          return { success: true, data: getLocalStudents() };
         }
+        saveLocalStudents(fetchedStudents);
+        studentsFreshUntil = Date.now() + 60000;
+        return { success: true, data: fetchedStudents };
 
-        const filtered = fetchedStudents.filter(s => 
-          !className || className === 'Tất cả' || s.className.trim().toLowerCase() === className.trim().toLowerCase()
-        );
-
-        return { success: true, data: filtered };
       }
     }
   } catch (err) {
@@ -93,258 +136,35 @@ export async function getStudentsByClass(className: string): Promise<{ success: 
   }
 
   // Fallback to local storage
-  const localList = getLocalStudents();
-  const classStudents = localList.filter(s => 
-    !className || className === 'Tất cả' || s.className.trim().toLowerCase() === className.trim().toLowerCase()
-  );
+  return { success: true, data: getLocalStudents(), isOfflineFallback: true };
 
-  return { success: true, data: classStudents, isOfflineFallback: true };
 }
 
 /**
  * Thêm học sinh mới lên Google Sheets API
  */
 export async function addStudentApi(payload: AddStudentPayload): Promise<{ success: boolean; message: string; newStudent: Student }> {
-  const newStudent: Student = {
-    id: `STU-${Date.now().toString().slice(-4)}`,
-    fullName: payload.fullName.trim(),
-    className: payload.className,
-    parentName: payload.parentName.trim(),
-    phone: payload.phone.trim(),
-    gender: Math.random() > 0.5 ? 'boy' : 'girl'
-  };
-
-  // Always save locally to ensure UI updates immediately
-  const currentStudents = getLocalStudents();
-  currentStudents.push(newStudent);
-  saveLocalStudents(currentStudents);
-
-  let apiSuccess = false;
-  let apiMsg = '';
-
-  try {
-    // Send POST to Google Apps Script
-    // GAS requires text/plain body to bypass CORS preflight issues
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      },
-      body: JSON.stringify({
-        action: 'addStudent',
-        // Vietnamese key aliases matching Google Sheets / Code.gs
-        HoTen: payload.fullName,
-        hoTen: payload.fullName,
-        Lop: payload.className,
-        lop: payload.className,
-        TenPhuHuynh: payload.parentName,
-        tenPhuHuynh: payload.parentName,
-        SoDienThoai: payload.phone,
-        soDienThoai: payload.phone,
-        MaHocSinh: newStudent.id,
-
-        // English camelCase key aliases
-        fullName: payload.fullName,
-        className: payload.className,
-        parentName: payload.parentName,
-        phone: payload.phone,
-        id: newStudent.id,
-        ID: newStudent.id,
-      }),
-    });
-
-    if (response.ok) {
-      apiSuccess = true;
-      apiMsg = 'Đã gửi dữ liệu thành công!';
-    } else {
-      apiMsg = `Phản hồi server: ${response.statusText}`;
-    }
-  } catch (err) {
-    console.warn('Không thể gửi POST tới API, dữ liệu đã lưu cục bộ:', err);
-    apiMsg = 'Đã lưu cục bộ.';
-  }
-
-  return {
-    success: true,
-    message: 'Thêm học sinh thành công!',
-    newStudent
-  };
+  const newStudent: Student = { id: `STU-${crypto.randomUUID()}`, fullName: payload.fullName.trim(), className: payload.className, parentName: payload.parentName.trim(), phone: payload.phone.trim(), gender: 'boy' };
+  const result = await postConfirmed({ action: 'addStudent', ...newStudent });
+  if (result.success) saveLocalStudents([...getLocalStudents(), newStudent]);
+  return { ...result, newStudent };
 }
 
-/**
- * Lưu kết quả điểm danh lên Google Sheets API
- */
 export async function saveAttendanceApi(payload: SaveAttendancePayload): Promise<{ success: boolean; message: string }> {
-  let apiSuccess = false;
-  let apiMsg = '';
-
-  try {
-    const absentNamesVal = payload.absentNames !== undefined
-      ? payload.absentNames
-      : (Array.isArray(payload.absentIds) ? payload.absentIds.join(', ') : payload.absentIds);
-
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      },
-      body: JSON.stringify({
-        action: 'saveAttendance',
-        class: payload.class,
-        className: payload.class,
-        Lop: payload.class,
-        lop: payload.class,
-
-        date: payload.date,
-        Ngay: payload.date,
-        ngay: payload.date,
-
-        absentIds: payload.absentIds,
-        absentNames: absentNamesVal,
-        danhsachvang: absentNamesVal,
-        danhSachVang: absentNamesVal,
-        DanhSachVang: absentNamesVal,
-      }),
-    });
-
-    if (response.ok) {
-      apiSuccess = true;
-      apiMsg = 'Đã cập nhật hệ thống thành công!';
-    } else {
-      apiMsg = `Server trả về mã: ${response.status}`;
-    }
-  } catch (err) {
-    console.warn('Không thể kết nối API:', err);
-    apiMsg = 'Đã gửi yêu cầu lưu điểm danh.';
-  }
-
-  return {
-    success: true,
-    message: `Đã lưu điểm danh lớp ${payload.class} ngày ${payload.date} thành công!`
-  };
+  return postConfirmed({ ...payload, action: 'saveAttendance', className: payload.class,
+    absentNames: payload.absentNames ?? payload.absentIds.join(', ') });
 }
 
-/**
- * Cập nhật thông tin học sinh
- */
 export async function updateStudentApi(updatedStudent: Student): Promise<{ success: boolean; message: string }> {
-  // Update local storage
-  const currentStudents = getLocalStudents();
-  const index = currentStudents.findIndex(s => s.id === updatedStudent.id);
-  if (index !== -1) {
-    currentStudents[index] = updatedStudent;
-    saveLocalStudents(currentStudents);
-  } else {
-    currentStudents.push(updatedStudent);
-    saveLocalStudents(currentStudents);
-  }
-
-  try {
-    // Attempt remote update POST request if API_URL is configured
-    await fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      },
-      body: JSON.stringify({
-        action: 'updateStudent',
-        student: updatedStudent,
-        id: updatedStudent.id,
-        ID: updatedStudent.id,
-        MaHocSinh: updatedStudent.id,
-
-        HoTen: updatedStudent.fullName,
-        hoTen: updatedStudent.fullName,
-        fullName: updatedStudent.fullName,
-
-        Lop: updatedStudent.className,
-        lop: updatedStudent.className,
-        className: updatedStudent.className,
-
-        TenPhuHuynh: updatedStudent.parentName,
-        tenPhuHuynh: updatedStudent.parentName,
-        parentName: updatedStudent.parentName,
-
-        SoDienThoai: updatedStudent.phone,
-        soDienThoai: updatedStudent.phone,
-        phone: updatedStudent.phone,
-      }),
-    });
-  } catch (err) {
-    console.warn('Không thể gửi yêu cầu cập nhật tới API, đã lưu cục bộ:', err);
-  }
-
-  return {
-    success: true,
-    message: 'Cập nhật thông tin học sinh thành công!'
-  };
+  const result = await postConfirmed({ action: 'updateStudent', ...updatedStudent });
+  if (result.success) saveLocalStudents(getLocalStudents().map(s => s.id === updatedStudent.id ? updatedStudent : s));
+  return result;
 }
 
-/**
- * Xóa học sinh khỏi danh sách
- */
 export async function deleteStudentApi(studentId: string): Promise<{ success: boolean; message: string }> {
-  try {
-    if (API_URL) {
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/plain;charset=utf-8',
-        },
-        body: JSON.stringify({
-          action: 'deleteStudent',
-          id: studentId,
-          ID: studentId,
-          MaHocSinh: studentId,
-        }),
-      });
-
-      if (response.ok) {
-        const text = await response.text();
-        let resJson: any = {};
-        try {
-          resJson = JSON.parse(text);
-        } catch (e) {
-          console.warn('Response từ deleteStudent không phải dạng JSON:', text);
-        }
-
-        const isSuccess = resJson.status === 'success' || resJson.success === true || text.toLowerCase().includes('success');
-
-        if (isSuccess) {
-          // Xóa ở local storage sau khi Backend Google Sheets xác nhận thành công
-          const currentStudents = getLocalStudents();
-          const updatedStudents = currentStudents.filter(s => s.id !== studentId);
-          saveLocalStudents(updatedStudents);
-
-          return {
-            success: true,
-            message: resJson.message || 'Đã xóa học sinh khỏi Google Sheets thành công!'
-          };
-        } else {
-          return {
-            success: false,
-            message: resJson.message || resJson.error || 'Xóa học sinh thất bại từ cơ sở dữ liệu Google Sheets.'
-          };
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Không thể gửi yêu cầu xóa tới API Google Sheets:', err);
-    return {
-      success: false,
-      message: 'Không thể kết nối tới Google Sheets. Vui lòng kiểm tra lại kết nối mạng.'
-    };
-  }
-
-  // Fallback nếu không cấu hình API_URL
-  const currentStudents = getLocalStudents();
-  const updatedStudents = currentStudents.filter(s => s.id !== studentId);
-  saveLocalStudents(updatedStudents);
-
-  return {
-    success: true,
-    message: 'Đã xóa học sinh thành công (lưu cục bộ)!'
-  };
+  const result = await postConfirmed({ action: 'deleteStudent', id: studentId });
+  if (result.success) saveLocalStudents(getLocalStudents().filter(s => s.id !== studentId));
+  return result;
 }
 
 /**
@@ -360,7 +180,7 @@ export async function getAttendanceHistoryApi(): Promise<{ success: boolean; dat
     const fetchUrl = `${API_URL}${separator}action=getAttendance&t=${new Date().getTime()}`;
 
     // TUYỆT ĐỐI KHÔNG THÊM HEADERS để tránh lỗi CORS với Google Apps Script
-    const response = await fetch(fetchUrl);
+    const response = await fetchWithTimeout(fetchUrl);
 
     if (response.ok) {
       const json = await response.json();
@@ -435,70 +255,7 @@ export async function getAttendanceHistoryApi(): Promise<{ success: boolean; dat
  * Xóa bản ghi điểm danh qua Google Sheets API (POST)
  */
 export async function deleteAttendanceApi(target: any): Promise<{ success: boolean; message: string }> {
-  if (!API_URL) {
-    return { success: true, message: 'Đã xóa bản ghi (Lưu cục bộ).' };
-  }
-
-  const isObj = typeof target === 'object' && target !== null;
-  const timestamp = isObj ? (target.timestamp || target.time || target.date || '') : String(target || '');
-  const date = isObj ? (target.date || target.ngay || target.Ngay || '') : timestamp;
-  const className = isObj ? (target.className || target.class || target.Lop || target.lop || '') : '';
-  const recordId = isObj ? (target.id || target.ID || target.ma || '') : '';
-
-  try {
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8'
-      },
-      redirect: 'follow',
-      body: JSON.stringify({
-        action: 'deleteAttendance',
-        timestamp: timestamp,
-        Time: timestamp,
-        time: timestamp,
-        thoiGian: timestamp,
-        ThoiGian: timestamp,
-        date: date,
-        Ngay: date,
-        ngay: date,
-        className: className,
-        class: className,
-        Lop: className,
-        lop: className,
-        id: recordId,
-        ID: recordId,
-        row: recordId
-      })
-    });
-
-    const text = await response.text();
-    let data: any = {};
-    try {
-      data = JSON.parse(text);
-    } catch (e) {
-      data = { message: text };
-    }
-
-    const isSuccess = response.ok || 
-      data.status === 'success' || 
-      data.success === true || 
-      data.result === 'success' ||
-      (data.message && String(data.message).toLowerCase().includes('thành công')) ||
-      (data.message && String(data.message).toLowerCase().includes('đã xóa')) ||
-      (typeof text === 'string' && (text.toLowerCase().includes('thành công') || text.toLowerCase().includes('success')));
-
-    return {
-      success: isSuccess,
-      message: data.message || (isSuccess ? 'Đã xóa bản ghi điểm danh thành công!' : 'Xóa bản ghi thất bại.')
-    };
-  } catch (err: any) {
-    console.warn('Lỗi gọi deleteAttendanceApi Google Sheets:', err);
-    return {
-      success: true,
-      message: 'Đã xóa bản ghi khỏi ứng dụng!'
-    };
-  }
+  return postConfirmed({ action: 'deleteAttendance', timestamp: typeof target === 'object' ? target.timestamp : String(target) });
 }
 
 /**
