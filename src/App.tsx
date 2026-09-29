@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Navbar, NavTab } from './components/Navbar';
-import { DailyAttendance } from './components/DailyAttendance';
-import { AddStudent } from './components/AddStudent';
+import { DailyAttendance } from './components/DailyAttendance.tsx';
+import { AddStudent } from './components/AddStudent.tsx';
 import { StudentList } from './components/StudentList';
 import { Reports } from './components/Reports';
 import { AIAssistant } from './components/AIAssistant';
@@ -14,7 +14,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('attendance');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [studentSignal, setStudentSignal] = useState<number>(0);
-  const [totalStudentsCount, setTotalStudentsCount] = useState<number>(0);
+  const [totalStudentsCount, setTotalStudentsCount] = useState<number>(() => getLocalStudents().length);
 
   // Load total student count
   useEffect(() => {
@@ -34,8 +34,10 @@ export default function App() {
         setTotalStudentsCount(list.length);
       }
     };
+    const updateCount = () => setTotalStudentsCount(getLocalStudents().length);
+    window.addEventListener('students-updated', updateCount);
     fetchTotal();
-    return () => { isMounted = false; };
+    return () => { isMounted = false; window.removeEventListener('students-updated', updateCount); };
   }, [studentSignal]);
 
   // Toast Helper
