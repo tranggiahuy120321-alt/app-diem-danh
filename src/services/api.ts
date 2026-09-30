@@ -167,17 +167,43 @@ export async function deleteStudentApi(studentId: string): Promise<{ success: bo
   return result;
 }
 
+type HistoryCache = { data: any[]; nextFrom: number; source: string };
+const HISTORY_KEY = `attendance_sync_v2:${API_URL}`;
+let historyMemory: HistoryCache | null = null;
+let historyRequest: Promise<{ success: boolean; data: any[] }> | null = null;
+
+function readHistoryCache(): HistoryCache | null {
+  if (historyMemory) return historyMemory;
+  try {
+    const value = JSON.parse(localStorage.getItem(HISTORY_KEY) || 'null');
+    if (value && Array.isArray(value.data) && Number.isInteger(value.nextFrom) && value.nextFrom >= 2 && typeof value.source === 'string' && value.data.every((r: any) => Number.isInteger(r.sheetRow) && r.sheetRow >= 2)) {
+      historyMemory = value;
+    }
+  } catch { /* Missing or corrupt cache requires a full first download. */ }
+  return historyMemory;
+}
+
+export function getLocalAttendanceHistory(): any[] {
+  return readHistoryCache()?.data || [];
+}
+
+export function getAttendanceHistoryApi(): Promise<{ success: boolean; data: any[] }> {
+  if (!historyRequest) historyRequest = fetchAttendanceHistory().finally(() => { historyRequest = null; });
+  return historyRequest;
+}
+
 /**
  * Lấy danh sách lịch sử điểm danh trực tiếp từ Google Sheets API (GET)
  */
-export async function getAttendanceHistoryApi(): Promise<{ success: boolean; data: any[] }> {
+async function fetchAttendanceHistory(): Promise<{ success: boolean; data: any[] }> {
   if (!API_URL) {
     return { success: true, data: [] };
   }
 
   try {
     const separator = API_URL.includes('?') ? '&' : '?';
-    const fetchUrl = `${API_URL}${separator}action=getAttendance&t=${new Date().getTime()}`;
+    const cached = readHistoryCache();
+    const fetchUrl = `${API_URL}${separator}action=getAttendance&sync=1&fromRow=${cached?.nextFrom || 2}&source=${encodeURIComponent(cached?.source || '')}&t=${Date.now()}`;
 
     // TUYỆT ĐỐI KHÔNG THÊM HEADERS để tránh lỗi CORS với Google Apps Script
     const response = await fetchWithTimeout(fetchUrl);
@@ -231,7 +257,8 @@ export async function getAttendanceHistoryApi(): Promise<{ success: boolean; dat
           const absentIdsVal = Array.isArray(item.absentIds) ? item.absentIds : [];
 
           return {
-            id: String(item.id || item.ID || `ATT-${idx + 1}`),
+            sheetRow: item.sheetRow,
+            id: String(item.id || item.ID || `ATT-${item.sheetRow || idx + 1}`),
             date: dateVal,
             className: classVal,
             absentNames: absentNamesVal,
@@ -240,7 +267,14 @@ export async function getAttendanceHistoryApi(): Promise<{ success: boolean; dat
           };
         });
 
-        // Đảm bảo theo thứ tự mới nhất nằm trên cùng
+        if (json.syncVersion === 2 && Number.isInteger(json.replaceFrom) && json.replaceFrom >= 2 && Number.isInteger(json.nextFrom) && json.nextFrom >= 2 && typeof json.source === 'string' && historyData.every(r => Number.isInteger(r.sheetRow) && r.sheetRow >= json.replaceFrom)) {
+          const prefix = cached && cached.source === json.source ? cached.data.filter(r => r.sheetRow < json.replaceFrom) : [];
+          const data = [...prefix, ...historyData].sort((a, b) => b.sheetRow - a.sheetRow);
+          historyMemory = { data, nextFrom: json.nextFrom, source: json.source };
+          try { localStorage.setItem(HISTORY_KEY, JSON.stringify(historyMemory)); } catch { /* Keep a working memory cache if storage is full. */ }
+          return { success: true, data };
+        }
+        // Older deployments remain readable but are not used as incremental caches.
         return { success: true, data: historyData.reverse() };
       }
     }
@@ -248,7 +282,7 @@ export async function getAttendanceHistoryApi(): Promise<{ success: boolean; dat
     console.warn('Lỗi gọi API getAttendance Google Sheets:', err);
   }
 
-  return { success: false, data: [] };
+  return { success: false, data: getLocalAttendanceHistory() };
 }
 
 /**
