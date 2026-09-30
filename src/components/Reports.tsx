@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { Student } from '../types';
 import { CLASSES } from '../config';
-import { getLocalStudents, getStudentsByClass, getAttendanceHistoryApi, deleteAttendanceApi } from '../services/api';
+import { getLocalStudents, getLocalAttendanceHistory, getStudentsByClass, getAttendanceHistoryApi, deleteAttendanceApi } from '../services/api';
 
 interface ReportsProps {
   addToast: (toast: { type: 'success' | 'error' | 'info'; title: string; message?: string }) => void;
@@ -142,8 +142,8 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [historyList, setHistoryList] = useState<any[]>([]);
-  const [students, setStudents] = useState<Student[]>([]);
+  const [historyList, setHistoryList] = useState<any[]>(getLocalAttendanceHistory);
+  const [students, setStudents] = useState<Student[]>(getLocalStudents);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [deletingTimestamp, setDeletingTimestamp] = useState<string | null>(null);
 
@@ -151,7 +151,7 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
   const handleDeleteRecord = async (rec: any) => {
     if (!isTodayRecord(rec)) {
       addToast({
-        type: 'warning',
+        type: 'info',
         title: 'Thao tác bị chặn',
         message: 'Chỉ được phép xóa bản ghi điểm danh trong ngày hôm nay để bảo vệ dữ liệu lịch sử.'
       });
@@ -164,27 +164,17 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
     const targetTs = rec.timestamp || rec.date || rec.id || '';
     setDeletingTimestamp(targetTs);
 
-    // Optimistically remove from UI immediately
-    setHistoryList((prev) => prev.filter((item) => {
-      if (rec.id && item.id && rec.id === item.id) return false;
-      if (rec.timestamp && item.timestamp && rec.timestamp === item.timestamp) return false;
-      return item !== rec;
-    }));
-
     try {
       const result = await deleteAttendanceApi(rec);
-      addToast({
-        type: 'success',
-        title: 'Đã xóa bản ghi',
-        message: result.message || 'Đã xóa bản ghi điểm danh thành công!'
-      });
-    } catch (error: any) {
-      console.error('Lỗi khi xóa bản ghi:', error);
-      addToast({
-        type: 'info',
-        title: 'Đã xóa khỏi danh sách',
-        message: 'Đã xóa bản ghi khỏi màn hình báo cáo.'
-      });
+      if (!result.success) {
+        addToast({ type: 'error', title: 'Chưa xác nhận xóa', message: result.message });
+        return;
+      }
+      setHistoryList(prev => prev.filter(item => item.timestamp !== rec.timestamp));
+      addToast({ type: 'success', title: 'Đã xóa bản ghi', message: result.message });
+      await loadData();
+    } catch (error) {
+      addToast({ type: 'error', title: 'Lỗi kết nối', message: 'Chưa xác nhận được kết quả xóa.' });
     } finally {
       setDeletingTimestamp(null);
     }
@@ -194,22 +184,14 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [historyRes, studentListRes] = await Promise.all([
-        getAttendanceHistoryApi(),
-        getStudentsByClass('Tất cả')
+      await Promise.all([
+        getAttendanceHistoryApi().then(historyRes => {
+          if (historyRes.success) setHistoryList(historyRes.data);
+          else addToast({ type: 'info', title: 'Chưa cập nhật được báo cáo', message: 'Đang giữ dữ liệu đã lưu trên máy. Bấm Tải lại để thử kết nối Google Sheets.' });
+        }),
+        getStudentsByClass('Tất cả').then(res => { if (res.success) setStudents(res.data); }),
       ]);
 
-      if (historyRes.success && Array.isArray(historyRes.data)) {
-        setHistoryList(historyRes.data);
-      } else {
-        setHistoryList([]);
-      }
-
-      if (studentListRes.success && Array.isArray(studentListRes.data)) {
-        setStudents(studentListRes.data);
-      } else {
-        setStudents(getLocalStudents());
-      }
     } catch (e) {
       console.error('Lỗi khi tải dữ liệu báo cáo:', e);
       addToast({ type: 'error', title: 'Lỗi kết nối', message: 'Không thể tải lịch sử điểm danh từ server.' });
@@ -646,7 +628,7 @@ export const Reports: React.FC<ReportsProps> = ({ addToast }) => {
         {/* SUB VIEW 1: HISTORY LOG TABLE */}
         {reportSubTab === 'history' && (
           <div className="space-y-4">
-            {isLoading ? (
+            {isLoading && historyList.length === 0 ? (
               <div className="py-12 text-center space-y-3 bg-slate-50/60 rounded-3xl border-2 border-dashed border-slate-200 p-6">
                 <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto" />
                 <p className="text-sm font-black text-slate-600">Đang tải dữ liệu</p>
